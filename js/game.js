@@ -1,0 +1,2595 @@
+'use strict';
+
+const CP_CAP = 250;
+
+/* Squad veterancy. Men who survive contact get better at it, which is the whole
+ * reason to pull a hurt squad back instead of feeding it. Kept deliberately small
+ * — this should reward keeping a squad alive, not make a rank-3 squad unkillable.
+ * Thresholds are kills by that squad. */
+const RANKS = [
+  { at: 0,  name: 'GREEN',     acc: 1.00, steady: 1.00 },
+  { at: 3,  name: 'SEASONED',  acc: 1.08, steady: 0.88 },
+  { at: 8,  name: 'VETERAN',   acc: 1.16, steady: 0.76 },
+  { at: 16, name: 'HARDENED',  acc: 1.24, steady: 0.64 },
+];
+
+function rankOf(xp) {
+  let r = 0;
+  for (let i = RANKS.length - 1; i >= 0; i--) {
+    if ((xp || 0) >= RANKS[i].at) { r = i; break; }
+  }
+  return r;
+}
+const INCOME = { us: 3.1, vc: 3.5 }; // squads cost more than v1 units — keep waves breathing
+const FLAG_INCOME = 0.5;
+const FLAG_DRAIN = 0.22;
+const MORALE_LOSS = { us: 0.24, vc: 0.15 }; // per CP of unit lost — US is casualty-sensitive
+const MAX_TRAPS = 10;
+
+/* Squads a side may have in the field at once.
+ *
+ * The AI has always capped itself here (`_aiPickUnit` bailed above 7 squads).
+ * The PLAYER never had a cap, and that one-sided limit decided every match:
+ * measured on veteran, the AI's CP climbed to the 250 ceiling while its unit
+ * count sat flat at 19 and the player fielded 105 men. Whoever spams wins, and
+ * only one side could spam.
+ *
+ * A symmetric limit fixes three things at once — the AI stops hoarding and
+ * stays competitive, matches turn on position rather than volume, and the unit
+ * count stops climbing into a frame-rate problem. It is also the more honest
+ * model: a commander gets a company, not an unlimited draft. */
+const MAX_SQUADS = 8;
+
+/* Concealment is a posture, not a map coordinate. Brush hides a man who has
+ * settled into it; it does not hide one crossing at a dead run. Gating on
+ * position alone made VC blink out mid-stride whenever they entered a conceal
+ * span — and those spans run to nearly half a lane on some maps, so a squad
+ * advancing down one popped in and out repeatedly. That reads as a rendering
+ * fault, not as stealth, which is the worst of both: it looks broken AND it
+ * gives away nothing about where the ambush actually is.
+ *
+ * stillT builds while a man holds position and zeroes the instant he moves, so
+ * breaking cover reveals immediately while a settled ambusher stays hidden. */
+const CONCEAL_SETTLE = 0.45;   // seconds of stillness before brush closes over him
+const CONCEAL_FADE = 0.40;     // seconds to dissolve out of sight once concealed
+
+/* How visible a concealed man stays. NOT zero.
+ *
+ * Concealment used to fade a man to nothing, and measured in a live battle 5%
+ * of all man-frames rendered at partial alpha with 580 of 659 of those FULLY
+ * INVISIBLE — one NVA spent 100% of his life unseeable. That is not an ambush,
+ * it is a unit the player can never see, and it reads as the renderer dropping
+ * frames rather than as an enemy hiding.
+ *
+ * The comment in the draw path has claimed for a long time that concealed men
+ * "settle to a dim shape in the brush" — this is that, finally made true. The
+ * tactical value is intact: at 0.22 you can tell something is there and not
+ * what it is or exactly where, which is what concealment should buy. What it
+ * should never buy is a man who is not drawn at all. */
+const CONCEAL_FLOOR = 0.22;
+
+/* structure archetypes: [w, hp] */
+const STRUCT_DEFS = {
+  hooch:     { w: 42, hp: 60 },
+  longhouse: { w: 74, hp: 110 },
+  stilt:     { w: 48, hp: 55 },
+  bunker:    { w: 52, hp: 220 },
+  well:      { w: 12, hp: 70 },
+  hay:       { w: 16, hp: 25 },
+  tower:     { w: 30, hp: 120 },   // sniper emplacement — commanding view
+  mgnest:    { w: 40, hp: 170 },   // log-and-sandbag MG position
+  banana:    { w: 24, hp: 20 },
+  cart:      { w: 28, hp: 24 },
+  shrine:    { w: 18, hp: 30 },
+  stall:     { w: 32, hp: 30 },
+  crates:    { w: 22, hp: 40 },   // stacked ammunition, at a firebase
+};
+
+function buildSettlement(map, s, structures) {
+  const rng = seeded((map.seed + s.lane * 7 + Math.floor(s.x * 997)) >>> 0);
+  const cx = s.x * WORLD_W;
+  const put = (kind, off) => {
+    const d = STRUCT_DEFS[kind];
+    structures.push({
+      lane: s.lane, x: cx + off, w: d.w, kind,
+      hp: s.pre ? d.hp * 0.4 : d.hp, maxHp: d.hp,
+      state: s.pre ? 1 : 0, burnT: 0, fireHurt: 0,
+      seed: Math.floor(rng() * 1e9),
+    });
+  };
+  if (s.kind === 'hamlet') {
+    put('hooch', -66); put('hooch', 6); put('hooch', 72);
+    put('well', -18); put('hay', 40);
+    put('banana', -96); put('cart', 98);
+  } else if (s.kind === 'village') {
+    put('hooch', -110); put('longhouse', -30); put('hooch', 52);
+    put('hooch', 112); put('well', 84); put('hay', -66);
+    put('banana', -146); put('shrine', -138); put('stall', 148); put('banana', 170);
+  } else if (s.kind === 'stilt') {
+    put('stilt', -54); put('stilt', 8); put('stilt', 66); put('hay', -14);
+    put('banana', 100); put('cart', -88);
+  } else if (s.kind === 'bunkers') {
+    /* There was a HAYSTACK here. `bunkers` is used by exactly two maps — the
+     * Marine perimeter at Khe Sanh and the NVA crest positions on Hill 937 —
+     * and both were getting a piece of farm dressing dropped between the
+     * fighting positions, because this branch was copied from the hamlet one.
+     * A position gets more position: sandbags and a stack of ammunition. */
+    put('bunker', -34); put('bunker', 38);
+    put('mgnest', 2); put('crates', -74);
+  }
+}
+
+class Game {
+  constructor(cfg) {
+    this.map = normaliseMap(MAPS[cfg.mapId]);
+    /* MOBILE: warm the atlases this match can actually field. They are no
+     * longer loaded at boot (see Sprite3D.load), so without this the first man
+     * of each type would draw as the procedural fallback for a frame. */
+    if (typeof Sprite3D !== 'undefined' && Sprite3D.prefetch) Sprite3D.prefetch(this.map);
+    this.player = cfg.playerSide;
+    this.enemy = other(this.player);
+    this.aiSide = this.enemy;
+    this.diff = DIFFS[cfg.difficulty || 'veteran'];
+    this.mode = this.map.mode;
+
+    this.fx = new FXManager(this.map);
+    this.units = [];
+    this.traps = [];
+    this.holes = [];
+    this.tunnels = [];
+    this.strikes = [];
+    this.fires = [];
+    this.events = [];
+    this.banner = null;
+
+    this.cp = { us: 30, vc: 30 };
+    if (this.map.startCP) for (const s in this.map.startCP) this.cp[s] += this.map.startCP[s];
+    this.morale = { us: 100, vc: 100 };
+    this.cool = { us: {}, vc: {} };
+    this.stats = {
+      us: { kills: 0, losses: 0, callins: 0, cpSpent: 0 },
+      vc: { kills: 0, losses: 0, callins: 0, cpSpent: 0 },
+    };
+    this.hiddenLoss = [0, 0, 0];
+
+    this.conceal = this.map.lanes.map(l =>
+      (l.conceal || []).map(z => ({ x0: z[0], x1: z[1], burned: false }))
+    );
+    this.flags = this.map.flags.map((fx_, i) => ({
+      lane: i, x: fx_ * WORLD_W, owner: this.map.preOwner || null, cap: 0, capSide: null,
+    }));
+
+    this.time = 0;
+    this.timeLimit = this.mode === 'siege' ? this.map.siegeTime : this.mode === 'assault' ? this.map.assaultTime : 0;
+    this.over = false;
+    this.result = null;
+    this.aiT = 2;
+    this.duelAnnounced = 0;
+
+    // settlements → destructible structures
+    this.structures = [];
+    for (const s of (this.map.settlements || [])) buildSettlement(this.map, s, this.structures);
+
+    // squads + cover network
+    this.squads = [];
+    this.nades = [];
+    this.smokes = [];
+    this.genCovers();
+    this._addWindows();
+
+    // ambient life
+    this.birdT = rand(4, 10);
+    this.patrolT = rand(30, 60);
+    const arng = seeded(this.map.seed + 99);
+    this.smokeSrc = [];
+    for (let i = 0; i < 2; i++) {
+      this.smokeSrc.push({ x: (0.2 + arng() * 0.6) * WORLD_W, t: arng() * 0.6 });
+    }
+
+    if (this.map.prePlaced) {
+      for (const p of this.map.prePlaced) {
+        const x = p.x * WORLD_W;
+        if (p.kind === 'unit') {
+          this._makeSquad(p.side, p.key, p.lane, x, { hold: true });
+        } else if (p.kind === 'hole') {
+          this.holes.push(this._makeHole(p.lane, x));
+        } else if (p.kind === 'trap') {
+          this.traps.push({ side: p.side, lane: p.lane, x, type: p.type, discovered: false, defuse: 0 });
+        }
+      }
+    }
+  }
+
+  emit(text, cls) {
+    this.events.push({ text, cls: cls || 'sys' });
+    if (this.events.length > 30) this.events.shift();
+  }
+
+  setBanner(text, danger) { this.banner = { text, danger: !!danger, fresh: true }; }
+
+  /* ---------- helpers ---------- */
+  inConceal(lane, x) {
+    return this.conceal[lane].some(z => !z.burned && x >= z.x0 * WORLD_W && x <= z.x1 * WORLD_W);
+  }
+
+  isConcealed(u) {
+    if (u.side !== 'vc' || !UNITS[u.key].conceal) return false;
+    if (u.revealT > 0 || u.spotT > 0) return false;
+    // Movement disqualifies concealment outright — including inside a prepared
+    // hide. A squad is flagged inCover from the moment it is bound to the
+    // position, not from when it settles, so exempting hides here left men
+    // running at full speed while invisible. Both checks read u.moving as well
+    // as stillT because stillT is accumulated from the previous frame's flag;
+    // without it a man stays hidden for the first frame of his sprint.
+    if (u.moving || (u.stillT || 0) < CONCEAL_SETTLE) return false;
+    const inHide = u.squad && u.squad.inCover && u.squad.cover && u.squad.cover.conceals;
+    return inHide || this.inConceal(u.lane, u.x);
+  }
+
+  visibleToPlayer(u) {
+    if (u.side === this.player) return true;
+    return !this.isConcealed(u);
+  }
+
+  /* How much smoke sits on a point, 0..1. Screening builds as the cloud develops
+   * and thins as it dies, so popping smoke is not instant cover. */
+  smokeAt(lane, x) {
+    let k = 0;
+    for (const s of this.smokes) {
+      if (s.lane !== lane) continue;
+      const d = Math.abs(s.x - x);
+      if (d > s.radius) continue;
+      const grow = Math.min(1, s.age / SMOKE.build);
+      const fade = Math.min(1, s.life / 2.5);
+      k = Math.max(k, (1 - d / s.radius) * grow * fade);
+    }
+    return k;
+  }
+
+  canSee(side, t) {
+    if (t.isHole) return t.revealT > 0 || t.discovered || side === 'vc';
+    if (t.side === side) return true;
+    // a target well inside smoke cannot be picked out
+    if (this.smokeAt(t.lane, t.x) > 0.55) return false;
+    return !this.isConcealed(t);
+  }
+
+  spawnX(side, lane) {
+    if (side === 'vc') {
+      const tn = this.tunnels.find(t => t.lane === lane);
+      if (tn) return tn.x;
+    }
+    return BASE_X[side];
+  }
+
+  _makeUnit(side, key, lane, x) {
+    const d = UNITS[key];
+    return {
+      side, key, lane, x,
+      y: groundY(this.map, lane, x),
+      dir: side === 'us' ? 1 : -1,
+      hp: d.hp, maxHp: d.hp,
+      sj: rand(0.94, 1.06), // slight build variation
+      // gait identity: without these a squad walks in perfect lockstep, which is
+      // the thing that reads as "robots" rather than men
+      gaitOff: Math.random(), gaitK: rand(0.93, 1.07),
+      /* Death identity, for the same reason and at no memory cost.
+       *
+       * There is ONE death clip per unit and no room for a second — the atlas
+       * sits at 89 MB of a 130 MB budget with props — so a squad caught by one
+       * burst went down as one animation played five times in perfect sync,
+       * which reads worse than lockstep walking because it happens all at once
+       * and the eye is already on it.
+       *
+       * Three cheap axes instead: how fast a man goes down, how long it takes
+       * him to start, and which way he settles. Fixed at spawn so a man dies
+       * the way he was always going to, not differently on every redraw. */
+      /* Ranges are WIDE on purpose. A squad is three to five men, and three
+       * draws from a narrow range cluster often enough to matter — measured a
+       * squad whose dieK came out 1.06/1.03/1.04, which spread the fall by one
+       * frame in twelve and was invisible. The spread has to survive a bad
+       * draw, not just look right in expectation. */
+      dieK: rand(0.6, 1.55),         // collapse rate
+      dieLag: rand(0, 0.2),          // he does not drop the instant he is hit
+      dieLean: rand(-0.22, 0.22),    // and does not land square
+      // a hair of depth inside the lane, so men who share an x do not become one
+      // flat stack of identical silhouettes
+      yj: rand(-2.5, 2.5),
+      burstN: 0, wounded: false,
+      phase: Math.random() * 6, moving: false, pose: null,
+      deadT: null, muzzleT: 0, fireT: rand(0, 0.5),
+      hitT: 0, combatT: 0, shots: 0, gibbed: false, baked: false,
+      suppressT: 0, slowT: 0, revealT: 0, spotT: 0, emergeT: 0,
+      aiming: false, aimT: 0, aimTime: d.aim || 0, aimTarget: null,
+      glintT: 0, hold: false, holdX: 0,
+      sniperUnit: !!d.sniper,
+      squad: null, slot: 0, cpShare: d.cost,
+    };
+  }
+
+  /* ---------- squads ---------- */
+  _makeSquad(side, skey, lane, x, opts = {}) {
+    const sd = SQUADS[skey];
+    const squad = {
+      side, key: skey, lane, x,
+      dir: side === 'us' ? 1 : -1,
+      order: opts.hold ? 'hold' : 'advance',
+      hold: !!opts.hold, holdX: opts.hold ? x : 0,
+      pin: 0, pinned: false, underFireT: 0, quietT: 0,
+      xp: 0, rank: 0,   // VETERAN CADRE starts the player's squads one rank up
+      ...(typeof Perks !== 'undefined' && Perks.on(this, side, 'cadre')
+        ? { xp: RANKS[1].at, rank: 1 } : {}),
+      cover: null, coverTarget: null, inCover: false,
+      emergeT: 0, men: [],
+    };
+    sd.comp.forEach((ukey, i) => {
+      const m = this._makeUnit(side, ukey, lane, x - squad.dir * i * 13);
+      m.squad = squad;
+      m.slot = i;
+      m.cpShare = sd.cost / sd.comp.length;
+      m.hold = squad.hold; m.holdX = squad.holdX;
+      squad.men.push(m);
+      this.units.push(m);
+    });
+    this.squads.push(squad);
+    return squad;
+  }
+
+  squadAlive(s) { return s.men.filter(m => m.deadT == null); }
+
+  squadAnchor(s) {
+    const alive = this.squadAlive(s);
+    if (!alive.length) return s.x;
+    return alive.reduce((a, m) => a + m.x, 0) / alive.length;
+  }
+
+  /* ---------- cover ---------- */
+  /* Firing ports on village buildings.
+   *
+   * Troops could already hold a building, but with nothing marking where they
+   * were they simply vanished into the wall — you could hear them shooting and
+   * not see them. A window gives the squad a defined spot to stand, the renderer
+   * something to cut into the wall behind them, and the position dies with the
+   * structure it belongs to.
+   */
+  _addWindows() {
+    const WINDOWED = { hooch: 1, longhouse: 1, stilt: 1, stall: 1 };
+    for (const st of this.structures) {
+      if (!WINDOWED[st.kind] || st.state === 2) continue;
+      const spot = this.addCover(st.lane, st.x, 'window', true, 44);
+      if (spot) {
+        spot.structRef = st;
+        // a stilt house is fought from its raised floor
+        spot.lift = st.kind === 'stilt' ? 16 : 0;
+      }
+    }
+  }
+
+  genCovers() {
+    this.covers = LANES.map(() => []);   // one per live lane, not a hardcoded three
+    const map = this.map;
+    const rng = seeded(map.seed + 777);
+    const biomeType = { grass: 'log', jungle: 'log', palm: 'dike', shattered: 'crater' }[map.trees] || 'log';
+
+    // EMPLACEMENTS: class-locked strongpoints, destructible via their structure.
+    // Every lane gets a sniper tower on its best ground and an MG nest, so each
+    // lane has a strongpoint worth taking and holding.
+    const erng = seeded(map.seed + 4242);
+    const emplace = (lane, x, kind) => {
+      const st = {
+        lane, x, w: STRUCT_DEFS[kind].w, kind,
+        hp: STRUCT_DEFS[kind].hp, maxHp: STRUCT_DEFS[kind].hp,
+        state: 0, burnT: 0, fireHurt: 0, seed: Math.floor(erng() * 1e9),
+      };
+      this.structures.push(st);
+      const spot = this.addCover(lane, x, kind === 'tower' ? 'towerpos' : 'nestpos', true);
+      if (spot) spot.structRef = st;
+    };
+    for (let lane = 0; lane < LANE_N; lane++) {
+      // tower on the highest ground in the lane's forward half
+      let bestX = WORLD_W * 0.5, bestE = -1;
+      for (let x = WORLD_W * 0.24; x < WORLD_W * 0.78; x += 40) {
+        const el = elevAt(map, lane, x) + erng() * 0.05;
+        if (el > bestE) { bestE = el; bestX = x; }
+      }
+      emplace(lane, bestX, 'tower');
+      // MG nest set back from the tower, covering the approach
+      const nx = clamp(bestX - (0.10 + erng() * 0.08) * WORLD_W, WORLD_W * 0.12, WORLD_W * 0.88);
+      if (Math.abs(nx - bestX) > 90) emplace(lane, nx, 'mgnest');
+    }
+
+    // TRENCH LINES astride every objective — the ground both sides must fight for
+    for (let lane = 0; lane < LANE_N; lane++) {
+      const fx = this.flags[lane].x;
+      this.addCover(lane, fx - 96, 'trench', true);
+      this.addCover(lane, fx + 96, 'trench', true);
+    }
+
+    // VC JUNGLE HIDES: firing positions inside the brush. VC only, and they keep
+    // their concealment while occupied, so the ambush doctrine has real estate.
+    for (let lane = 0; lane < LANE_N; lane++) {
+      for (const z of this.conceal[lane]) {
+        const x0 = z.x0 * WORLD_W, x1 = z.x1 * WORLD_W;
+        const n = Math.max(1, Math.round((x1 - x0) / 260));
+        for (let i = 0; i < n; i++) {
+          const hx = x0 + (x1 - x0) * ((i + 0.5) / n) + (erng() - 0.5) * 60;
+          this.addCover(lane, hx, 'hide', true);
+        }
+      }
+    }
+
+    // priority spots first — the scatter pass dedupes around them
+    // dug positions on the garrison lines, matching the pre-placed defenders
+    if (map.id === 'khesanh') {
+      for (const p of map.prePlaced || []) {
+        if (p.kind === 'unit') this.addCover(p.lane, p.x * WORLD_W, 'trench', true);
+      }
+    }
+    if (map.id === 'hill937') {
+      for (const p of map.prePlaced || []) {
+        if (p.kind === 'unit') this.addCover(p.lane, p.x * WORLD_W, 'trench', true);
+      }
+    }
+    // villages are fighting positions: low walls flank every settlement
+    for (const s of (map.settlements || [])) {
+      const cx = s.x * WORLD_W;
+      this.addCover(s.lane, cx - 118, 'wall', true);
+      this.addCover(s.lane, cx + 118, 'wall', true);
+    }
+
+    for (let lane = 0; lane < LANE_N; lane++) {
+      let x = WORLD_W * 0.16 + rng() * 120;
+      while (x < WORLD_W * 0.86) {
+        // don't bury cover in flags or settlements
+        const nearFlag = Math.abs(x - this.flags[lane].x) < 70;
+        const nearStruct = this.structures.some(st => st.lane === lane && Math.abs(st.x - x) < st.w);
+        if (!nearFlag && !nearStruct) {
+          const t = rng() < 0.25 ? 'sandbag' : biomeType;
+          this.addCover(lane, x, t, true);
+        }
+        x += 150 + rng() * 105;
+      }
+    }
+  }
+
+  addCover(lane, x, type, static_ = false, minGap) {
+    const defs = {
+      log:     { w: 34, prot: 0.4 },
+      sandbag: { w: 34, prot: 0.5 },
+      dike:    { w: 38, prot: 0.45 },
+      crater:  { w: 36, prot: 0.38 },
+      trench:  { w: 62, prot: 0.6 },
+      rubble:  { w: 40, prot: 0.5 },
+      wall:    { w: 36, prot: 0.5 },
+      towerpos:{ w: 30, prot: 0.45, classReq: 'sniper' },
+      nestpos: { w: 40, prot: 0.6,  classReq: 'mg' },
+      hide:    { w: 34, prot: 0.35, sideReq: 'vc', conceals: true },
+      // a firing port cut in a village building — see genCovers
+      window:  { w: 30, prot: 0.55 },
+    };
+    const d = defs[type];
+    if (!d) return null;
+    const lc = this.covers[lane];
+    // Windows belong to a specific building, and village huts stand closer
+    // together than the general 70px spacing rule allows — at that radius almost
+    // every firing port was rejected and buildings had none.
+    const gap = minGap != null ? minGap : 70;
+    if (lc.some(c => Math.abs(c.x - x) < gap)) return null;
+    if (!static_ && lc.filter(c => c.dyn).length >= 8) return null;
+    const spot = {
+      lane, x, w: type === 'rubble' ? Math.max(40, d.w) : d.w, type, prot: d.prot,
+      occ: null, dyn: !static_, lift: 0,
+      classReq: d.classReq || null, sideReq: d.sideReq || null, conceals: !!d.conceals,
+    };
+    lc.push(spot);
+    return spot;
+  }
+
+  squadFitsCover(s, c) {
+    if (c.sideReq && s.side !== c.sideReq) return false;
+    if (!c.classReq) return true;
+    return this.squadAlive(s).some(m =>
+      c.classReq === 'sniper' ? m.sniperUnit : !!UNITS[m.key][c.classReq]);
+  }
+
+  freeCoverAhead(squad, maxDist) {
+    // Troops under fire take the nearest cover FORWARD or right where they are.
+    // They never stroll rearward to find a better hole — men who break contact
+    // backwards across open ground get killed, and it read as cowardly wandering.
+    let best = null, bd = 1e9;
+    for (const c of this.covers[squad.lane]) {
+      if (c.occ && c.occ !== squad) continue;
+      if (!this.squadFitsCover(squad, c)) continue;
+      const dx = (c.x - squad.x) * squad.dir;
+      if (dx < -28 || dx > maxDist) continue;
+      const score = dx >= 0 ? dx : -dx * 3;
+      if (score < bd) { bd = score; best = c; }
+    }
+    return best;
+  }
+
+  _updateSquads(dt) {
+    for (let i = this.squads.length - 1; i >= 0; i--) {
+      const s = this.squads[i];
+      const alive = this.squadAlive(s);
+      if (!alive.length) {
+        if (s.cover && s.cover.occ === s) s.cover.occ = null;
+        this.squads.splice(i, 1);
+        continue;
+      }
+      s.underFireT = Math.max(0, s.underFireT - dt);
+      s.emergeT = Math.max(0, s.emergeT - dt);
+      s.nadeCd = Math.max(0, (s.nadeCd || 0) - dt);
+      s.suppCd = Math.max(0, (s.suppCd || 0) - dt);
+      if ((s.crossT || 0) > 0) s.crossT = Math.max(0, s.crossT - dt);
+      /* Resupply, but only out of contact. A squad that has fired in the last
+       * 1.2s is still in the fight and gets nothing — otherwise ammo would top
+       * up between bursts and the limit would never bind. */
+      s.firedT = Math.max(0, (s.firedT || 0) - dt);
+      if (s.ammo == null) s.ammo = 1;
+      if (s.firedT <= 0) s.ammo = Math.min(1, s.ammo + AMMO_REGEN * dt);
+      // a focus order must never outlive its target, or the squad keeps its
+      // concentration bonus pointed at a squad that no longer exists
+      if (s.focus && !this.squadAlive(s.focus).length) s.focus = null;
+      s.smokeCd = Math.max(0, (s.smokeCd || 0) - dt);
+      s.suppFireT = Math.max(0, (s.suppFireT || 0) - dt);
+      // pin: builds from incoming fire (added in _fire/_areaDamage), decays in lulls
+      // veterans keep their heads when green troops would be pinned
+      if (s.underFireT <= 0) s.pin = Math.max(0, s.pin - dt * 0.24 * (2 - RANKS[s.rank || 0].steady));
+      s.pin = Math.min(1.4, s.pin);
+      s.pinned = s.pinned ? s.pin > 0.28 : s.pin > 0.6;
+      if (s.pinned) {
+        // whole squad hugs the ground — reuses the prone/speed/accuracy penalties
+        for (const m of alive) m.suppressT = Math.max(m.suppressT, 0.45);
+        /* Keep the dust up between incoming rounds.
+         *
+         * Impact dust alone makes suppression flicker: a pinned squad reads as
+         * suppressed on the frames something lands near it and as idle on the
+         * frames nothing does, when the STATE is continuous — they are held down
+         * the whole time. A low trickle in front of the squad, aimed back down
+         * the line of fire, keeps the read on without adding a second mechanic.
+         * Rate-limited rather than per-frame; the particle cap is shared with
+         * every muzzle flash on the field. */
+        s.dustCd = (s.dustCd || 0) - dt;
+        // No count gate here: FXManager.add drops `prio: 0` decoration once the
+        // field is busy, which is the same job done in one place and by the
+        // right rule. A hard 150 here just meant the dust switched OFF in
+        // exactly the heavy firefights it exists to describe.
+        if (s.dustCd <= 0) {
+          s.dustCd = rand(0.10, 0.22);
+          const ax = this.squadAnchor(s);
+          this.fx.suppressDust(ax + s.dir * rand(10, 44), groundY(this.map, s.lane, ax),
+            -s.dir, LANE_DEPTH[s.lane]);
+        }
+      }
+
+      if (s.emergeT > 0) continue;
+
+      /* A squad halts when it reaches the range its WEAPONS want, not the
+       * instant anything is technically in range. See ENGAGE_AT: halting on
+       * first contact left both sides trading fire at the edge of their reach,
+       * with the closest approach ever measured at 216px and zero man-frames
+       * inside 160px. The squad closes until its nearest visible enemy is
+       * inside the tightest preferred range among its living men — so a rifle
+       * team pushes in while the machine gun with it stops earlier and shoots
+       * them forward. */
+      let nearestFoe = 1e9;
+      for (const f of this.units) {
+        if (f.side === s.side || f.deadT != null || f.lane !== s.lane) continue;
+        if (!this.canSee(s.side, f)) continue;
+        nearestFoe = Math.min(nearestFoe, Math.abs(f.x - s.x));
+      }
+      /* TIGHTEST preferred range in the squad, not the loosest. Taking the max
+       * halts the squad at its longest-reaching weapon, which is the opposite of
+       * closing — it pushed the closest approach from 216px out to 255px. The
+       * min makes the riflemen's wish govern, so the squad advances until they
+       * are where they want to be. */
+      let wantDist = Infinity;
+      for (const m of alive) {
+        const md = UNITS[m.key];
+        wantDist = Math.min(wantDist, md.range * engageFrac(md));
+      }
+      if (!isFinite(wantDist)) wantDist = 0;
+      const atRange = nearestFoe <= wantDist;
+      const engaged = atRange && alive.some(m => (m.combatT || 0) > 0 || m.aiming);
+      const sp = Math.min(...alive.map(m => UNITS[m.key].speed)) *
+        (alive.some(m => m.slowT > 0) ? 0.45 : 1);
+      const xBefore = s.x;
+
+      // Under effective fire: get into the nearest position forward. Never back.
+      if (s.order === 'advance' && s.underFireT > 0 && !s.inCover && !s.coverTarget) {
+        const c = this.freeCoverAhead(s, 150);
+        if (c) { s.coverTarget = c; s.order = 'tocover'; }
+      }
+      // Bounding: troops moving up occupy the strongpoints they pass through
+      // (trench, nest, tower, hide) instead of walking by them in the open.
+      s.coverCd = Math.max(0, (s.coverCd || 0) - dt);
+      if (s.order === 'advance' && !s.inCover && !s.coverTarget && !s.playerHeld &&
+          s.coverCd <= 0) {
+        const strong = { trench: 1, nestpos: 1, towerpos: 1, hide: 1, wall: 1,
+                         rubble: 1, window: 1 };
+        let pick = null, bd = 1e9;
+        for (const c of this.covers[s.lane]) {
+          if (!strong[c.type] || (c.occ && c.occ !== s)) continue;
+          if (!this.squadFitsCover(s, c)) continue;
+          const dx = (c.x - s.x) * s.dir;
+          // Strictly AHEAD. A window starting behind the squad included the hole it
+          // was standing in, so a squad that timed out of cover re-claimed the same
+          // cover on the next tick, reset its timer, and never advanced again —
+          // both sides parked outside weapon range and no shot was ever fired.
+          if (dx < 60 || dx > 210) continue;
+          if (dx < bd) { bd = dx; pick = c; }
+        }
+        if (pick) { s.coverTarget = pick; s.order = 'tocover'; }
+      }
+
+      if (s.order === 'tocover' && s.coverTarget) {
+        if (s.coverTarget.occ && s.coverTarget.occ !== s) {
+          s.coverTarget = null; s.order = 'advance';
+        } else {
+          const dx = s.coverTarget.x - s.x;
+          if (Math.abs(dx) < 6) {
+            s.cover = s.coverTarget; s.coverTarget = null;
+            s.cover.occ = s; s.inCover = true; s.order = 'holdcover'; s.quietT = 0;
+            s.ceding = false;
+          } else {
+            // rush the hole — crawl if pinned, sprint otherwise
+            s.x += Math.sign(dx) * Math.min(Math.abs(dx), sp * (s.pinned ? 0.35 : 1.15) * dt);
+          }
+        }
+      } else if (s.order === 'holdcover') {
+        // a squad on ADVANCE orders pushes on once the shooting stops; only an
+        // explicit player HOLD keeps it in the hole
+        if (s.underFireT <= 0 && !engaged && !s.playerHeld) {
+          s.quietT += dt;
+          if (s.quietT > 2.6) {
+            if (s.cover) s.cover.occ = null;
+            s.cover = null; s.inCover = false; s.order = s.hold ? 'hold' : 'advance';
+            // do not let it dive straight back into the hole it just left
+            s.coverCd = 3.5;
+          }
+        } else s.quietT = 0;
+      } else if (s.order === 'moveto') {
+        const dx = s.moveToX - s.x;
+        if (Math.abs(dx) < 6) {
+          s.order = 'hold'; s.hold = true; s.holdX = s.x; s.ceding = false;
+        } else if (!s.pinned) {
+          s.x += Math.sign(dx) * Math.min(Math.abs(dx), sp * 1.05 * dt);
+        }
+      } else if (s.order === 'hold') {
+        if ((s.x - s.holdX) * s.dir < 0 && !s.pinned && !engaged) {
+          s.x += s.dir * sp * dt;
+        } else if (!s.inCover) {
+          // settle into a dug position on our hold point if one exists
+          const c = this.covers[s.lane].find(c2 => !c2.occ && Math.abs(c2.x - s.holdX) < 50);
+          if (c) { c.occ = s; s.cover = c; s.inCover = true; }
+        }
+      } else if (s.order === 'advance') {
+        // Bounding: nobody walks upright into a lane that is being swept. A
+        // squad only crosses open ground while a friendly is putting rounds
+        // down, or while the enemy is still out of effective range.
+        let hostileFire = 0;
+        for (const o of this.squads) {
+          if (o.side === s.side || o.lane !== s.lane) continue;
+          if (!this.squadAlive(o).length) continue;
+          const d = Math.abs(this.squadAnchor(o) - s.x);
+          if (d < 340 && o.men.some(m => (m.combatT || 0) > 0)) hostileFire++;
+        }
+        const covering = this.squads.some(o =>
+          o !== s && o.side === s.side && o.lane === s.lane &&
+          this.squadAlive(o).length && o.men.some(m => (m.combatT || 0) > 0));
+        // screened by our own smoke, a squad can cross ground it otherwise would not
+        const screened = this.smokeAt(s.lane, s.x) > 0.35 ||
+          this.smokeAt(s.lane, s.x + s.dir * 70) > 0.35;
+        const mayMove = hostileFire === 0 || covering || s.inCover || screened;
+        if (!s.pinned && !engaged && this._squadPathClear(s) && mayMove) {
+          s.x += s.dir * sp * dt;
+        }
+      }
+      // hard-sync anchor if men drifted (breakthrough removal etc.)
+      if (Math.abs(this.squadAnchor(s) - s.x) > 90) s.x = this.squadAnchor(s);
+
+      // GROUND IS NEVER GIVEN UP by accident. Losing the point man used to drag
+      // the squad's anchor rearward, which read as troops wandering backwards
+      // under fire. Only an explicit FALL BACK or MOVE order may cede ground.
+      const ceding = !!s.ceding;
+      if (s.front === undefined) s.front = s.x;
+      if (ceding) {
+        s.front = s.x;
+      } else {
+        if ((s.x - s.front) * s.dir > 0) s.front = s.x;
+        else if ((s.front - s.x) * s.dir > 16) s.x = s.front - s.dir * 16;
+      }
+      s._advancing = Math.abs(s.x - xBefore) > 0.01;
+
+      // stance state machine — ONE owner, with commitment so nobody yo-yos.
+      // A man stays prone ≥2.4s and standing ≥1.1s before he may switch.
+      let nearFoe = 1e9;
+      for (const f of this.units) {
+        if (f.side === s.side || f.lane !== s.lane || f.deadT != null) continue;
+        nearFoe = Math.min(nearFoe, Math.abs(f.x - s.x));
+      }
+      for (let mi = 0; mi < alive.length; mi++) {
+        const m = alive[mi];
+        if (m.sniperUnit || (m.nadeT || 0) > 0) continue;
+        if (UNITS[m.key].vehicle) { m.stance = 'stand'; m.pose = null; continue; }
+        m.stanceT = (m.stanceT || 0) + dt;
+        if (!m.stance) m.stance = 'stand';
+        let want = m.stance;
+        /* Being CLOSE to the enemy is not a reason to stand up.
+         *
+         * This used to read `nearFoe < 150 -> stand`, which meant every man rose
+         * to his feet in exactly the situation where he should be lowest: a
+         * close-range firefight. It was the single most visible wrongness in the
+         * game. Only ASSAULTING justifies standing at that range — closing the
+         * distance is worth the exposure, trading shots at 100px is not. */
+        /* THREE stances now, not two. Standing and prone alone made every
+         * firefight either a parade or a line of men flat on their faces —
+         * measured, 80% of man-frames were moving and only 8.9% prone, so
+         * nearly every man in contact was upright in the open.
+         *
+         * Kneeling is the middle: what a man does behind a paddy dike or a log
+         * when he is fighting but not pinned. It goes to the men who are in
+         * contact but not under effective fire, which is most of a firefight. */
+        /* Ordered from most-pinned to least. KNEELING IS THE DEFAULT FIGHTING
+         * POSTURE and prone is reserved for men who are actually being shot at,
+         * which is the opposite of how this read before: standing and prone
+         * were the only options, so a firefight was either a parade or a line
+         * of men flat on their faces.
+         *
+         * The front-rank prone rule used to sit above the kneel and swallowed
+         * it — squads are three to five men, so `mi < 2` is most of them, and
+         * kneeling never fired at all. It now applies only under fire. */
+        const hot = s.underFireT > 0 || s.pinned;
+        if (m.moving || s._advancing) want = 'stand';
+        else if (s.pinned) want = 'prone';
+        else if (s.inCover && (engaged || hot)) want = 'prone';   // gun on the parapet
+        else if (hot && nearFoe < 150) want = 'prone';
+        else if (hot && mi < 2) want = 'prone';                   // front rank eats it first
+        else if (hot || engaged || (m.combatT || 0) > 0) want = 'kneel';
+        else if ((m.combatT || 0) <= 0 && m.stanceT > 3) want = 'stand';
+        /* The commitment lock exists so nobody yo-yos.
+         *
+         * `|| m.moving` bypassed it for ANY change, in either direction. Because
+         * `moving` flickers on and off as men settle into squad slots, dropping
+         * prone could retrigger every few frames — a man pumping up and down on
+         * the spot. But the bypass was not pointless: a prone man told to move
+         * has to be able to get up NOW, or he pops back down the moment he
+         * stops. So it survives in exactly that one direction. Getting up to
+         * move plays no transition frames because the run cycle already covers
+         * it; everything else serves its commitment. */
+        const lock = m.stance === 'prone' ? 2.4 : m.stance === 'kneel' ? 1.6 : 1.1;
+        const rising = m.stance === 'prone' && want === 'stand';
+        /* The rising bypass keys off the SQUAD advancing, not off the man's
+         * per-frame `moving` flag.
+         *
+         * `moving` flickers as men settle into slots, and every flicker was a
+         * licence to stand straight back up — so a man dropped prone, bounced
+         * up, dropped again, about once a second. Measured, that left a tail
+         * flipping 34 times a MINUTE while the median man never changed stance
+         * at all, so the average looked perfectly healthy and hid it. Putting a
+         * time floor on the bypass only slowed the bounce (34 -> 27/min, still
+         * a flip every 2.2s, still faster than the 2.4s + 1.1s locks allow),
+         * because it treated the symptom rather than the flickering input.
+         *
+         * `_advancing` is squad-level and stable across frames, and it is the
+         * thing the exemption was always FOR: a prone squad ordered forward has
+         * to get on its feet at once. A lone man's slot-shuffle is not that. */
+        if (want !== m.stance &&
+            (m.stanceT >= lock || (rising && s._advancing && m.stanceT >= 0.35))) {
+          const prev = m.stance;
+          m.stance = want;
+          m.stanceT = 0;
+          if (!m.moving) {
+            /* The transition runs between the two stances it actually joins.
+             *
+             * `transDir = want === 'prone' ? 1 : -1` was written when there were
+             * only two stances, and adding the kneel broke it: standing up into
+             * a KNEEL is not 'prone', so it took the -1 branch and played the
+             * dive clip backwards from frame 1 — which IS the prone pose. A man
+             * rising from his feet to one knee flashed through lying down.
+             *
+             * Stored as the FROM and TO frames instead, so any pair works.
+             * `dive` frame 0 is the crouch/kneel and frame 1 is prone, so both
+             * standing and kneeling start at 0; a stand<->kneel change holds
+             * frame 0 throughout and the cross-fade out of the standing clip
+             * does the work, which is what it should have been doing anyway. */
+            m.transA = (prev === 'prone') ? 1 : 0;
+            m.transB = (want === 'prone') ? 1 : 0;
+            m.transDir = m.transB >= m.transA ? 1 : -1;   // kept for the vector rig
+            m.transT = STANCE_TRANS;
+          }
+        }
+        // pose is NOT set here — see _updatePose, which runs after the men have
+        // actually moved. Deriving it in this pass read last frame's movement.
+      }
+    }
+  }
+
+  /* Keep converging squads out of each other's silhouette.
+   *
+   * Spacing WITHIN a squad comes from slot offsets, but nothing held two
+   * separate squads apart, so wherever they converged — a flag, a cover
+   * position, a choke — their men stood inside one another. Measured on mekong:
+   * 7.8% of same-side, same-lane man-pairs from different squads sat within
+   * 16px, and the worst were exactly co-located. At 84px tall that is one
+   * soldier wearing another.
+   *
+   * This separates the squad ANCHOR, not the men. A first attempt nudged each
+   * man's x after movement and made the figure slightly WORSE (7.8% -> 8.5%),
+   * because `_advance` drives every man toward `s.x` plus his slot offset each
+   * frame: correcting the output of that while leaving its input alone is a tug
+   * of war the correction loses. Moving the anchor moves what the slots are
+   * measured from, so the whole formation steps aside and the men keep their
+   * spacing relative to each other.
+   *
+   * Soft on purpose — a fraction of the shortfall per frame, so orders and
+   * cover still decide where a squad is going; they merely stop arriving on the
+   * same spot.
+   */
+  _separate(dt) {
+    // Raised with the slot spacing: two squads 26px apart still interleaved
+    // their outer men once each formation got wider.
+    const GAP = 46;              // clear ground between two formations
+    const RATE = 2.4;
+    const byLane = new Map();
+    for (const s of this.squads) {
+      const alive = this.squadAlive(s);
+      if (!alive.length || s.inCover) continue;   // a squad holding cover stays put
+      const k = s.side + ':' + s.lane;
+      let a = byLane.get(k);
+      if (!a) { a = []; byLane.set(k, a); }
+      a.push({ s, n: alive.length });
+    }
+    for (const arr of byLane.values()) {
+      if (arr.length < 2) continue;
+      arr.sort((a, b) => a.s.x - b.s.x);
+      for (let i = 1; i < arr.length; i++) {
+        const A = arr[i - 1], B = arr[i];
+        // half of each formation's own width, plus clear ground between them
+        const need = (A.n + B.n) * 0.5 * 34 + GAP;
+        const d = B.s.x - A.s.x;
+        if (d >= need) continue;
+        const push = (need - d) * 0.5 * Math.min(1, RATE * dt);
+        A.s.x = clamp(A.s.x - push, 20, WORLD_W - 20);
+        B.s.x = clamp(B.s.x + push, 20, WORLD_W - 20);
+      }
+    }
+  }
+
+  /* Presentation state, derived ONCE per frame after everything has moved.
+   *
+   * This used to be computed inside the squad pass, which runs BEFORE units
+   * move — so `pose` was decided from last frame's movement and then disagreed
+   * with this frame's. The disagreement manufactured phantom intermediate
+   * states: a man went `prone > walk > idle2 > prone` where nothing but a
+   * one-frame mismatch had happened, and every one of those is a clip change
+   * the 0.18s cross-fade cannot resolve. Measured, the worst men were changing
+   * animation 60-80 times a minute, which is what reads as jank.
+   *
+   * Snipers and grenade-throwers own their own pose and are left alone here,
+   * exactly as the squad pass leaves them alone.
+   */
+  _updatePose(dt) {
+    for (const u of this.units) {
+      if (u.deadT != null) continue;
+
+      // debounced movement for animation only — the raw flag flickers sub-100ms
+      if (u.moving) u.moveHoldT = MOVE_HOLD;
+      else u.moveHoldT = Math.max(0, (u.moveHoldT || 0) - dt);
+      u.movingVis = !!u.moving || u.moveHoldT > 0;
+
+      if (u.sniperUnit || (u.nadeT || 0) > 0) continue;
+      if (UNITS[u.key].vehicle) { u.pose = null; continue; }
+      u.pose = u.movingVis ? null
+        : (u.stance === 'prone' ? 'prone' : u.stance === 'kneel' ? 'kneel' : null);
+    }
+  }
+
+  /* ---------- player/AI squad orders ---------- */
+  orderSquad(s, order, arg) {
+    if (!s || !this.squadAlive(s).length) return false;
+    const release = () => {
+      if (s.cover && s.cover.occ === s) s.cover.occ = null;
+      s.cover = null; s.inCover = false; s.coverTarget = null;
+    };
+    if (order === 'advance') {
+      release();
+      s.ceding = false;
+      s.hold = false; s.playerHeld = false; s.order = 'advance';
+    } else if (order === 'hold') {
+      release();
+      s.ceding = false;
+      s.hold = true; s.holdX = s.x; s.playerHeld = true; s.order = 'hold';
+    } else if (order === 'fallback') {
+      release();
+      s.ceding = true;   // the one order allowed to give ground
+      // scramble back to the previous cover, or just give ground
+      let best = null, bd = 1e9;
+      for (const c of this.covers[s.lane]) {
+        if (c.occ && c.occ !== s) continue;
+        const dx = (s.x - c.x) * s.dir; // behind us
+        if (dx < 20 || dx > 420) continue;
+        if (dx < bd) { bd = dx; best = c; }
+      }
+      s.playerHeld = true;
+      if (best) { s.coverTarget = best; s.order = 'tocover'; }
+      else { s.moveToX = s.x - s.dir * 130; s.order = 'moveto'; }
+    } else if (order === 'moveto') {
+      release();
+      s.ceding = true;   // the player picked the spot, forward or back
+      s.playerHeld = true;
+      // snap to a free cover spot if the click is on one (and the class fits)
+      const c = this.covers[s.lane].find(c2 => (!c2.occ || c2.occ === s) &&
+        this.squadFitsCover(s, c2) && Math.abs(c2.x - arg) < c2.w);
+      if (c) { s.coverTarget = c; s.order = 'tocover'; }
+      else { s.moveToX = clamp(arg, 30, WORLD_W - 30); s.order = 'moveto'; }
+    } else if (order === 'grenade') {
+      return this._squadGrenade(s);
+    } else if (order === 'focus') {
+      return this._squadFocus(s);
+    } else if (order === 'crosslane') {
+      return this._squadCrossLane(s);
+    }
+    if (order === 'smoke') {
+      return this._squadSmoke(s);
+    } else if (order === 'suppress') {
+      return this._squadSuppress(s);
+    }
+    return true;
+  }
+
+  /* CROSS TO THE OTHER LANE.
+   *
+   * Lane was fixed at spawn, so "where you fight" was never a decision — you
+   * chose a lane when you bought a squad and lived with it. Everything else in
+   * the game is about position, and the largest positional choice on the board
+   * was unavailable.
+   *
+   * The cost is what makes it a decision rather than a free teleport: a squad
+   * crossing is in the open, out of cover, and holding its fire for the whole
+   * traverse. Sending your MG to the collapsing lane means it does not shoot for
+   * two seconds and cannot be recalled mid-crossing.
+   *
+   * The lane flips IMMEDIATELY — targeting, cover lookups and the render pass
+   * all key off `lane`, and leaving it on the old value for the duration would
+   * have men shooting across a lane they are no longer in. What interpolates is
+   * only the DRAWN y (see _updateUnits), so the move reads as a walk rather than
+   * a teleport.
+   */
+  _squadCrossLane(s) {
+    if (LANE_N < 2) return false;
+    const men = this.squadAlive(s);
+    if (!men.length || (s.crossT || 0) > 0) return false;
+    const to = s.lane === 0 ? 1 : 0;
+    // release cover: it belongs to the lane being left
+    if (s.cover && s.cover.occ === s) s.cover.occ = null;
+    s.cover = null; s.inCover = false; s.coverTarget = null;
+    s.crossFrom = s.lane;
+    s.crossT = CROSS_TIME;
+    s.lane = to;
+    s.order = 'hold';
+    s.hold = true; s.holdX = s.x; s.playerHeld = true;
+    for (const m of men) {
+      m.crossFrom = m.lane;
+      m.crossT = CROSS_TIME;
+      m.lane = to;
+    }
+    return true;
+  }
+
+  /* FOCUS FIRE — the squad concentrates on one enemy squad instead of each man
+   * choosing for himself.
+   *
+   * Riflemen deliberately spread fire (`_acquire` adds rand(0,150) so bursts
+   * walk a bunched line rather than queueing on the point man), which is right
+   * by default and wrong when one enemy squad is the problem. Concentrating
+   * kills a squad outright instead of wounding three, and a dead squad stops
+   * shooting back — that is the whole trade the player now gets to make, and it
+   * is the decision the middle of a firefight was missing.
+   *
+   * Picks the nearest enemy squad this one can actually see and engage. Cleared
+   * automatically when that squad is gone, so focus can never strand a squad
+   * shooting at nothing.
+   */
+  _squadFocus(s) {
+    const alive = this.squadAlive(s);
+    if (!alive.length) return false;
+    const ax = this.squadAnchor(s);
+    let best = null, bd = 1e9;
+    for (const o of this.squads) {
+      if (o.side === s.side || o.lane !== s.lane) continue;
+      const men = this.squadAlive(o);
+      if (!men.length) continue;
+      if (!men.some(m => this.canSee(s.side, m))) continue;
+      const d = Math.abs(this.squadAnchor(o) - ax);
+      if (d < bd) { bd = d; best = o; }
+    }
+    if (!best) return false;
+    // picking the same squad twice releases it, so one key toggles
+    s.focus = (s.focus === best) ? null : best;
+    return true;
+  }
+
+  /* Pop smoke between the squad and whatever is shooting at it. Thrown short of
+   * the enemy, not onto them — the point is a screen to move behind. */
+  _squadSmoke(s) {
+    if ((s.smokeCd || 0) > 0) return false;
+    const alive = this.squadAlive(s);
+    if (!alive.length) return false;
+    const anchor = this.squadAnchor(s);
+    s.smokeCd = SMOKE.cd;
+    const m = alive[0];
+    m.nadeT = 0.75;
+    m.nadeDur = m.nadeT;
+    m.nadeThrown = false;
+    m.nadeSmoke = true;
+    m.nadeTarget = anchor + s.dir * SMOKE.range * 0.62;
+    if (s.side === this.player) this.emit(`SMOKE OUT — LANE ${s.lane + 1}`, s.side);
+    return true;
+  }
+
+  _squadGrenade(s) {
+    const sd = SQUADS[s.key];
+    if (!sd.grenades || (s.nadeCd || 0) > 0) return false;
+    const alive = this.squadAlive(s);
+    // nearest enemy squad anchor in throw range
+    let target = null, bd = 1e9;
+    for (const o of this.squads) {
+      if (o.side === s.side || o.lane !== s.lane) continue;
+      const oa = this.squadAnchor(o);
+      if (!this.squadAlive(o).length) continue;
+      const d = Math.abs(oa - s.x);
+      if (d < GRENADE.range && d < bd) { bd = d; target = oa; }
+    }
+    if (target == null) return false;
+    s.nadeCd = GRENADE.cd;
+    let n = 0;
+    for (const m of alive) {
+      if (n >= 3 || m.sniperUnit) continue;
+      n++;
+      m.nadeT = 0.9 + n * 0.25; // staggered wind-ups
+      m.nadeDur = m.nadeT;
+      m.nadeThrown = false;
+      m.nadeTarget = target + rand(-18, 18);
+    }
+    if (s.side === this.player) this.emit(`GRENADES OUT — LANE ${s.lane + 1}`, s.side);
+    return n > 0;
+  }
+
+  _squadSuppress(s) {
+    const sd = SQUADS[s.key];
+    if (!sd.suppressive || (s.suppCd || 0) > 0) return false;
+    // covering fire is the most expensive thing a squad can do; it cannot be
+    // ordered on an empty load
+    if ((s.ammo != null ? s.ammo : 1) < AMMO_LOW) {
+      if (s.side === this.player) this.emit('OUT OF AMMUNITION', s.side);
+      return false;
+    }
+    s.suppCd = 20;
+    s.suppFireT = 5;
+    if (s.side === this.player) this.emit(`SUPPRESSIVE FIRE — LANE ${s.lane + 1}`, s.side);
+    return true;
+  }
+
+  _updateSmokes(dt) {
+    for (let i = this.smokes.length - 1; i >= 0; i--) {
+      const s = this.smokes[i];
+      s.age += dt;
+      s.life -= dt;
+      // a cloud drifts and spreads as it dies
+      s.radius += dt * 2.2;
+      if (s.life <= 0) this.smokes.splice(i, 1);
+    }
+  }
+
+  _updateNades(dt) {
+    for (let i = this.nades.length - 1; i >= 0; i--) {
+      const n = this.nades[i];
+      if (!n.landed) {
+        n.x += n.vx * dt;
+        n.y += n.vy * dt;
+        n.vy += 620 * dt;
+        n.spin += dt * 14;
+        const gy = groundY(this.map, n.lane, n.x);
+        if (n.y >= gy) {
+          n.y = gy; n.landed = true;
+          n.vx = 0;
+        }
+      } else {
+        n.fuse -= dt;
+        if (n.fuse <= 0) {
+          this.nades.splice(i, 1);
+          this.fx.explosion(n.x, n.y - 2, 40, { shake: 3 });
+          Sound.explosion(0.6, n.x);
+          this.fx.addDecal(n.lane, n.x, 'crater', 7);
+          if (n.smoke) {
+            this.smokes.push({ lane: n.lane, x: n.x, radius: SMOKE.radius,
+              life: SMOKE.life, age: 0, side: n.side });
+            this.fx.smokePuff(n.x, n.y);
+          } else {
+            this._areaDamage(n.lane, n.x, GRENADE.blast, GRENADE.dmg, { side: n.side }, n.side);
+          }
+        }
+      }
+    }
+  }
+
+  _squadPathClear(s) {
+    for (const o of this.squads) {
+      if (o === s || o.side !== s.side || o.lane !== s.lane) continue;
+      if (!this.squadAlive(o).length) continue;
+      const gap = (o.x - s.x) * s.dir;
+      if (gap > 0 && gap < 44) return false;
+    }
+    return true;
+  }
+
+  _makeHole(lane, x) {
+    return {
+      isHole: true, side: 'vc', lane, x,
+      y: groundY(this.map, lane, x) - 5,
+      hp: 60, maxHp: 60, cd: rand(1, 2.5), revealT: 0, discovered: false,
+      dirToTarget: -1, deadT: null, defuse: 0,
+    };
+  }
+
+  /* ---------- spawning & call-ins ---------- */
+  trySpawn(side, key, lane, opts = {}) {
+    const d = SQUADS[key];
+    if (!d || d.side !== side || this.over) return false;
+    /* Validate the lane before anything is spent.
+     *
+     * Same class as the trap leak in callinValid: an out-of-range lane sailed
+     * through and blew up deep inside the terrain lookup on `pts`, AFTER CP had
+     * been deducted and the cooldown set. A caller with a stale lane index
+     * therefore got charged for a squad that never existed. Rejecting up front
+     * keeps the failure cheap and total. */
+    if (!(lane >= 0 && lane < LANE_N)) return false;
+    // the field limit applies to the player too — see MAX_SQUADS
+    if (!opts.free &&
+        this.squads.filter(q => q.side === side && this.squadAlive(q).length).length >= MAX_SQUADS) {
+      return false;
+    }
+    if (!opts.free) {
+      if ((this.cool[side][key] || 0) > 0) return false;
+      if (this.cp[side] < d.cost) return false;
+      this.cp[side] -= d.cost;
+      this.stats[side].cpSpent += d.cost;
+      this.cool[side][key] = d.cd;
+    }
+    const x = opts.x != null ? opts.x : this.spawnX(side, lane);
+    const squad = this._makeSquad(side, key, lane, x, { hold: !!opts.hold });
+    if (side === 'vc' && opts.x == null && this.tunnels.some(t => t.lane === lane)) {
+      squad.emergeT = 0.9;
+      squad.men.forEach((m, i) => { m.emergeT = 0.5 + i * 0.22; });
+      this.fx.smokePuff(x, squad.men[0].y);
+    }
+    return true;
+  }
+
+  callinValid(side, key, lane, x) {
+    /* Validate the LANE, not just the position.
+     *
+     * This checked x-bounds and the trap cap but never the lane index, so a
+     * caller passing a lane that does not exist got a silent success: CP was
+     * spent, the trap was pushed, and it then sat in a lane nothing iterates —
+     * never triggered, never drawn, never cleaned up, yet still counted against
+     * MAX_TRAPS. Ten of those and every subsequent punji and mine placement
+     * fails, which quietly disables VC ground doctrine mid-match.
+     *
+     * The proximate cause was one stale `randi(0, 2)`, now fixed. This check is
+     * here so the next stale lane literal fails loudly instead of leaking. */
+    if (!(lane >= 0 && lane < LANE_N)) return false;
+    const lo = WORLD_W * 0.06, hi = WORLD_W * 0.94;
+    if (x < lo || x > hi) return false;
+    if (key === 'tunnel') {
+      if (x < WORLD_W * 0.4) return false;
+      if (this.tunnels.some(t => t.lane === lane)) return false;
+    }
+    if ((key === 'punji' || key === 'mine') && this.traps.filter(t => t.side === side).length >= MAX_TRAPS) return false;
+    return true;
+  }
+
+  tryCallin(side, key, lane, x) {
+    const d = CALLINS[key];
+    if (!d || d.side !== side || this.over) return false;
+    const artyK = (typeof Perks !== 'undefined' && Perks.on(this, side, 'arty')) ? 0.75 : 1;
+    const cost = d.cost * artyK;
+    if ((this.cool[side][key] || 0) > 0 || this.cp[side] < cost) return false;
+    if (d.target === 'point' && !this.callinValid(side, key, lane, x)) return false;
+
+    this.cp[side] -= cost;
+    this.stats[side].cpSpent += cost;
+    this.stats[side].callins++;
+    this.cool[side][key] = d.cd;
+    const isPlayer = side === this.player;
+
+    switch (key) {
+      case 'arty': {
+        const impacts = [];
+        for (let i = 0; i < 6; i++) {
+          impacts.push({ t: 2.6 + i * 0.38 + rand(0, 0.2), x: clamp(x + rand(-115, 115), 20, WORLD_W - 20), dmg: 42, r: 78, done: false });
+        }
+        this.strikes.push({ type: 'arty', side, lane, x, age: 0, dur: 6, impacts });
+        Sound.radio(); Sound.shellWhistle(1.8);
+        this.emit(`FIRE MISSION LANE ${lane + 1} — SHOT, OVER`, side);
+        break;
+      }
+      case 'napalm':
+        this.strikes.push({ type: 'napalm', side, lane, x, age: 0, dur: 5, dropT: 2.2, dropped: false });
+        Sound.radio();
+        setTimeout(() => Sound.jet(), 0);
+        this.emit(`AIR STRIKE INBOUND — LANE ${lane + 1}`, side);
+        break;
+      case 'medevac':
+        this.strikes.push({ type: 'medevac', side, age: 0, dur: 5, healed: false });
+        Sound.radio(); Sound.chopper(4.5);
+        this.emit('DUSTOFF INBOUND — GOLDEN HOUR', side);
+        break;
+      case 'aircav': {
+        this.strikes.push({ type: 'aircav', side, lane, x, age: 0, dur: 6.2, dropped: false });
+        Sound.radio(); Sound.chopper(5.5);
+        this.emit(`AIR CAV INSERTION — LANE ${lane + 1}`, side);
+        break;
+      }
+      case 'arclight': {
+        const impacts = [];
+        for (let i = 0; i < 12; i++) {
+          impacts.push({ t: 3.5 + i * 0.22, x: clamp(x - 330 + i * 60 + rand(-20, 20), 20, WORLD_W - 20), dmg: 60, r: 96, done: false });
+        }
+        this.strikes.push({ type: 'arclight', side, lane, x, age: 0, dur: 8, impacts });
+        Sound.radio(); Sound.bomberRumble(5);
+        this.setBanner('ARC LIGHT INBOUND', true);
+        this.emit('B-52 STRIKE CONFIRMED — DANGER CLOSE', side);
+        break;
+      }
+      case 'punji':
+        this.traps.push({ side, lane, x, type: 'punji', discovered: false, defuse: 0 });
+        Sound.shovel(x);
+        if (isPlayer) this.emit(`PUNJI STAKES SET — LANE ${lane + 1}`, side);
+        break;
+      case 'mine':
+        this.traps.push({ side, lane, x, type: 'mine', discovered: false, defuse: 0 });
+        Sound.shovel(x);
+        if (isPlayer) this.emit(`TRIPWIRE SET — LANE ${lane + 1}`, side);
+        break;
+      case 'spiderhole':
+        this.holes.push(this._makeHole(lane, x));
+        Sound.shovel(x);
+        if (isPlayer) this.emit(`MARKSMAN BURIED — LANE ${lane + 1}`, side);
+        break;
+      case 'tunnel':
+        this.tunnels.push({ side, lane, x, discovered: false, defuse: 0, hp: 90 });
+        Sound.shovel(x);
+        if (isPlayer) this.emit(`TUNNEL EXIT DUG — LANE ${lane + 1}`, side);
+        this.fx.smokePuff(x, groundY(this.map, lane, x));
+        break;
+    }
+    return true;
+  }
+
+  /* ---------- main update ---------- */
+  update(dt) {
+    if (this.over) { this.fx.update(dt); return; }
+    this.time += dt;
+
+    for (const side of ['us', 'vc']) {
+      let inc = INCOME[side];
+      inc += this.flags.filter(f => f.owner === side).length * FLAG_INCOME;
+      if (this.map.incomeMult && this.map.incomeMult[side]) inc *= this.map.incomeMult[side];
+      inc *= side === this.player ? this.diff.playerIncome : this.diff.aiIncome;
+      this.cp[side] = Math.min(CP_CAP, this.cp[side] + inc * dt);
+      const cools = this.cool[side];
+      for (const k in cools) cools[k] = Math.max(0, cools[k] - dt);
+    }
+
+    this._spottingPass(dt);
+    this._updateSquads(dt);
+    this._updateUnits(dt);
+    this._separate(dt);        // keep converging squads from standing inside each other
+    this._updatePose(dt);      // presentation, derived once the men have moved
+    this._updateNades(dt);
+    this._updateSmokes(dt);
+    this._updateHoles(dt);
+    this._updateStrikes(dt);
+    this._updateFires(dt);
+    this._updateStructures(dt);
+    this._ambient(dt);
+    this._updateFlags(dt);
+    this._aiUpdate(dt);
+    this.fx.update(dt);
+
+    // flag pressure on morale
+    const net = this.flags.filter(f => f.owner === 'us').length - this.flags.filter(f => f.owner === 'vc').length;
+    if (net > 0) this.morale.vc -= net * FLAG_DRAIN * dt;
+    else if (net < 0) this.morale.us -= -net * FLAG_DRAIN * dt;
+
+    this._checkEnd();
+  }
+
+  _checkEnd() {
+    this.morale.us = clamp(this.morale.us, 0, 100);
+    this.morale.vc = clamp(this.morale.vc, 0, 100);
+    let winner = null, reason = '';
+    if (this.morale.us <= 0) { winner = 'vc'; reason = 'US morale broken — the operation is called off.'; }
+    else if (this.morale.vc <= 0) { winner = 'us'; reason = 'VC/NVA morale broken — they melt back into the jungle.'; }
+    else if (this.mode === 'assault' && this.flags.every(f => f.owner === 'us')) {
+      winner = 'us'; reason = 'All objectives taken. The crest is yours — at a price.';
+    } else if (this.timeLimit && this.time >= this.timeLimit) {
+      if (this.mode === 'siege') { winner = 'us'; reason = 'The weather lifted and the relief column arrived. The siege is broken.'; }
+      else { winner = 'vc'; reason = 'The assault is called off. The hill remains in enemy hands.'; }
+    }
+    if (winner) {
+      this.over = true;
+      this.result = { winner, reason };
+      Sound.bell(winner === this.player);
+    }
+  }
+
+  /* ---------- spotting / discovery ---------- */
+  _spottingPass(dt) {
+    const penalty = this.map.detectPenalty || 1;
+    for (const u of this.units) {
+      if (u.side !== 'us' || u.deadT != null) continue;
+      let base = (UNITS[u.key].detect || 70) * penalty;
+      if (typeof Perks !== 'undefined' && Perks.on(this, u.side, 'scouts')) base *= 1.25;
+      const eng = UNITS[u.key].engineer;
+      const isRecon = !!UNITS[u.key].detect;
+      for (const v of this.units) {
+        if (v.side !== 'vc' || v.deadT != null || v.lane !== u.lane) continue;
+        if (!this.isConcealed(v)) continue;
+        const elevAdv = elevAt(this.map, u.lane, u.x) - elevAt(this.map, v.lane, v.x);
+        const r = base * (1 + 0.4 * Math.max(0, elevAdv));
+        if (Math.abs(v.x - u.x) < r) {
+          if (v.spotT <= 0) {
+            this.fx.floater(v.x, v.y - 44, 'SPOTTED', '#ffd98a');
+            if (this.player === 'us') this.emit(`CONTACT — LANE ${v.lane + 1}`, 'us');
+          }
+          v.spotT = 5;
+        }
+      }
+      const dr = isRecon ? 150 : eng ? 100 : 0;
+      if (dr) {
+        for (const t of this.traps) {
+          if (t.lane === u.lane && !t.discovered && Math.abs(t.x - u.x) < dr) {
+            t.discovered = true;
+            this.fx.floater(t.x, groundY(this.map, t.lane, t.x) - 20, 'TRAP MARKED', '#ffd98a');
+          }
+        }
+        for (const h of this.holes) {
+          if (h.lane === u.lane && !h.discovered && Math.abs(h.x - u.x) < dr) {
+            h.discovered = true;
+            this.fx.floater(h.x, h.y - 20, 'SPIDER HOLE', '#ffd98a');
+          }
+        }
+        for (const tn of this.tunnels) {
+          if (tn.lane === u.lane && !tn.discovered && Math.abs(tn.x - u.x) < dr) {
+            tn.discovered = true;
+            this.fx.floater(tn.x, groundY(this.map, tn.lane, tn.x) - 20, 'TUNNEL FOUND', '#ffd98a');
+          }
+        }
+      }
+    }
+  }
+
+  /* ---------- units ---------- */
+  _targetsFor(side, lane) {
+    const foes = [];
+    for (const u of this.units) {
+      if (u.side !== side && u.deadT == null && u.lane === lane && u.emergeT <= 0) foes.push(u);
+    }
+    if (side === 'us') {
+      for (const h of this.holes) {
+        if (h.lane === lane && (h.revealT > 0 || h.discovered)) foes.push(h);
+      }
+    }
+    return foes;
+  }
+
+  _acquire(u) {
+    const d = UNITS[u.key];
+    const foes = this._targetsFor(u.side, u.lane);
+    const eu = elevAt(this.map, u.lane, u.x);
+    let best = null, bestScore = -1e9;
+    for (const f of foes) {
+      if (!this.canSee(u.side, f)) continue;
+      const dx = (f.x - u.x) * u.dir;
+      if (dx < -40) continue;
+      const ef = elevAt(this.map, f.lane, f.x);
+      let range = d.range * (1 + 0.3 * clamp(eu - ef, -0.9, 0.9));
+      // a sniper in a tower sees forever
+      if (u.sniperUnit && u.squad && u.squad.inCover && u.squad.cover &&
+          u.squad.cover.type === 'towerpos') range *= 1.3;
+      const dist = Math.abs(f.x - u.x);
+      if (dist > range) continue;
+      let score = -dist;
+      // riflemen distribute fire across a bunched group instead of queueing
+      // on the point man — every acquire re-rolls, so bursts walk the line
+      if (!d.sniper) score += rand(0, 150);
+      /* ...unless the player has called for concentrated fire. Big enough to
+       * beat the spread roll and any distance term inside a unit's range, but
+       * NOT absolute: a man still will not shoot through a wall or past his
+       * reach, because the range and line-of-sight tests above already ran. */
+      if (u.squad && u.squad.focus && f.squad === u.squad.focus) score += 900;
+      if (d.sniper) {
+        if (f.sniperUnit) score += 600;
+        else if (!f.isHole && UNITS[f.key] && UNITS[f.key].mg) score += 300;
+        if (f.isHole) score += 200;
+      }
+      if (score > bestScore) { bestScore = score; best = f; }
+    }
+    return best;
+  }
+
+  _fire(u, t) {
+    const d = UNITS[u.key];
+    // every round comes out of the squad's load — see AMMO_PER_SHOT
+    if (u.squad) {
+      const supp = (u.squad.suppFireT || 0) > 0;
+      u.squad.ammo = Math.max(0, (u.squad.ammo == null ? 1 : u.squad.ammo) -
+        AMMO_PER_SHOT * (supp ? AMMO_SUPP_MULT : 1));
+      u.squad.firedT = 1.2;      // "recently shooting", so resupply cannot overlap a firefight
+    }
+    const distT = Math.abs(t.x - u.x);
+    const closeQuarters = distT < d.range * 0.45;
+    // burst cadence: quick rounds inside a burst, a long breath between bursts —
+    // shorter breaths when the enemy is right on top of you
+    const suppressive = d.mg && u.squad && (u.squad.suppFireT || 0) > 0;
+    // running dry stretches the breath between bursts: degraded, still dangerous
+    const dry = u.squad && (u.squad.ammo != null) && u.squad.ammo < AMMO_LOW
+      ? 1 + 1.6 * (1 - u.squad.ammo / AMMO_LOW) : 1;
+    if (suppressive) {
+      u.fireT = 1 / d.rof; // the gun talks without pause
+    } else if (d.burst) {
+      if (!u.burstN || u.burstN <= 0) u.burstN = randi(d.burst[0], d.burst[1]);
+      u.burstN--;
+      const ammo = (typeof Perks !== 'undefined' && Perks.on(this, u.side, 'ammo')) ? 0.78 : 1;
+      u.fireT = u.burstN > 0 ? 1 / d.rof
+        : rand(d.pause[0], d.pause[1]) * (closeQuarters ? 0.7 : 1) * ammo * dry;
+    } else {
+      u.fireT = (1 / d.rof) * dry;
+    }
+    // 0.07 was ~4 frames — snappy, and gone before the eye caught it. 0.11 still
+    // reads as a flash rather than a lamp, and roughly doubles the chance that
+    // any given frame shows one.
+    u.muzzleT = 0.11;
+    u.combatT = 0.9;
+    u.shots++;
+    const scale = LANE_DEPTH[u.lane];
+    const mp = muzzlePoint(u);
+    const mx = mp.x, my = mp.y;
+    this.fx.muzzle(mx, my, u.dir, scale, !!d.mg);
+    this.fx.casing(u.x + u.dir * 2 * scale, my + 3, u.dir, scale);
+    if (u.shots % 4 === 0) this.fx.addDecal(u.lane, u.x - u.dir * 3 + rand(-4, 4), 'casing', 1);
+    if (d.at) Sound.rocket(mx);
+    else Sound.shot(d.mg ? 'mg' : u.side === 'us' ? 'm16' : 'ak', mx);
+    if (Math.random() < 0.08) this.tryBirds(u.x);
+
+    const wasHidden = this.isConcealed(u);
+    if (u.side === 'vc' && UNITS[u.key].conceal) u.revealT = 6.0;
+
+    const suppressed = u.suppressT > 0;
+    // point-blank volleys land far more often — close fights resolve fast
+    const closeK = clamp(1 - distT / (d.range || 1), 0, 1);
+    /* Cover shields you from fire ACROSS GROUND, not from a man in your face.
+     *
+     * Measured: 87% of all shots are taken at a target in cover, average
+     * protection 0.56 — so a flat multiplier was not a situational advantage, it
+     * was a permanent halving of everyone's damage, and firefights took ~35
+     * rounds per casualty. Scaling it by range keeps a dug-in squad genuinely
+     * hard to shift at distance while letting a close assault break the position,
+     * which is how the fight is supposed to resolve. */
+    let rawProt = (!t.isHole && t.squad && t.squad.inCover && t.squad.cover)
+      ? t.squad.cover.prot : 0;
+    if (rawProt && typeof Perks !== 'undefined' && Perks.on(this, t.side, 'entrench')) {
+      rawProt = Math.min(0.82, rawProt * 1.28);
+    }
+    const coverMult = 1 - rawProt * (0.34 + 0.46 * (1 - closeK));
+    const vet = u.squad ? RANKS[u.squad.rank || 0].acc : 1;
+    const hit = Math.random() <
+      d.acc * vet * (1 + 0.7 * closeK) * (suppressed ? 0.7 : 1) * coverMult;
+
+    if (Math.random() < 0.3) this.fx.smokePuffSmall(mx, my);
+    if (hit) {
+      const ty = t.y - (t.isHole ? 0 : 14 * LANE_DEPTH[t.lane]);
+      // roughly one round in four is a tracer, as a belt is actually loaded
+      this.fx.tracer(mx, my, t.x + rand(-4, 4), ty + rand(-4, 4),
+        u.side === 'us' ? '#ffd98a' : '#ffb08a', 'spark', ((u.shots || 0) % 4) === 0);
+      const eu = elevAt(this.map, u.lane, u.x), ef = elevAt(this.map, t.lane, t.x);
+      let dmg = d.dmg * (1 + 0.35 * clamp(eu - ef, -0.9, 0.9));
+      if (wasHidden && d.ambush && d.ambush > 1) {
+        dmg *= d.ambush;
+        this.fx.floater(u.x, u.y - 46, 'AMBUSH!', '#e08767', true);
+      }
+      if (d.suppress && !t.isHole) t.suppressT = 0.8;
+      if (!t.isHole && t.squad) {
+        const nest = u.squad && u.squad.inCover && u.squad.cover && u.squad.cover.type === 'nestpos';
+        t.squad.pin += (d.suppress ? 0.13 : 0.06) * (suppressive ? 2 : 1) * (nest ? 1.5 : 1) *
+          RANKS[t.squad.rank || 0].steady;
+        t.squad.underFireT = 1.4;
+      }
+      if (d.at) {
+        /* A rocket does not "hit a man" — it detonates. Area damage, flagged
+         * heavy so armour is no defence, which is the whole reason the weapon
+         * exists. */
+        this.fx.explosion(t.x, t.y - 10, 46, { shake: 6 });
+        this._areaDamage(u.lane, t.x, d.blast || 44, dmg, { side: u.side }, u.side);
+        this.fx.punch(0.06, u.dir, -0.2);
+      } else {
+        this._damage(t, dmg, u);
+        if (!t.isHole) this.fx.blood(t.x, t.y, LANE_DEPTH[t.lane]);
+      }
+    } else {
+      // rounds go long or drop short — visibly
+      const dist = (t.x - u.x) * u.dir;
+      const missAt = Math.max(30, dist + rand(-60, 150));
+      const ex = u.x + u.dir * missAt;
+      const short = missAt < dist - 6;
+      const gy = groundY(this.map, u.lane, ex);
+      const ey = short ? gy : gy - rand(2, 26 * scale);
+      this.fx.tracer(mx, my, ex + rand(-4, 4), ey,
+        u.side === 'us' ? '#ffd98a' : '#ffb08a',
+        (short || Math.random() < 0.45) ? 'dirt' : null,
+        ((u.shots || 0) % 4) === 0);
+      // impact debris by what is actually there: timber splinters off a building,
+      // sparks off an emplacement, water out of a paddy, dirt everywhere else
+      if (short || Math.random() < 0.5) {
+        const hitSt = this.structures.find(st2 => st2.lane === u.lane &&
+          st2.state !== 2 && Math.abs(st2.x - ex) < st2.w * 0.7);
+        if (hitSt) {
+          if (hitSt.kind === 'tower' || hitSt.kind === 'mgnest') {
+            this.fx.sparks(ex, ey);
+            if (Math.random() < 0.5) Sound.ricochet(ex);
+          } else {
+            this.fx.splinters(ex, ey, scale);
+            if (Math.random() < 0.2) Sound.ricochet(ex);
+          }
+        } else if (this.map.trees === 'palm' && Math.random() < 0.35) {
+          this.fx.waterPlume(ex, gy);
+        } else {
+          // a belt-fed gun throws visibly more earth than a rifle — an M60 burst
+          // and a single rifle shot used to land identically
+          this.fx.dirtKick(ex, gy, scale, !!d.mg || !!suppressive);
+        }
+      }
+      // cracking rounds keep heads down even when they miss
+      if (!t.isHole && Math.abs(ex - t.x) < 46 && Math.random() < 0.6) {
+        /* Draw the suppression the sim is already applying. Everything below
+         * this line has always happened — accuracy halved, advances stopped,
+         * stance driven to prone — and the only thing on screen saying so was
+         * the word PINNED in 8px type. The dust walks in from the firing side. */
+        this.fx.suppressDust(ex, groundY(this.map, t.lane, ex),
+          Math.sign(u.x - t.x) || 1, LANE_DEPTH[t.lane]);
+        t.suppressT = Math.max(t.suppressT || 0, rand(0.4, 0.9));
+        if (t.squad) {
+          t.squad.pin += (d.suppress ? 0.1 : 0.045) * (suppressive ? 2 : 1) *
+            RANKS[t.squad.rank || 0].steady;
+          t.squad.underFireT = 1.2;
+        }
+      }
+    }
+  }
+
+  _damage(t, dmg, killer, opts = {}) {
+    // armour turns rifle fire aside; a satchel, mine or shell goes straight through
+    const arm = !t.isHole && UNITS[t.key] && UNITS[t.key].armour;
+    if (arm) {
+      // Rifle fire is nearly useless against a hull; a shaped charge is the
+      // opposite. Five satchels to kill made the APC a wall rather than a
+      // decision — two is the trade that keeps sappers relevant.
+      dmg *= opts.heavy ? 2.4 : (1 - arm) * 0.42;
+    }
+    /* A sniper is very hard to answer at distance.
+     *
+     * `farArmour` is not armour in the vehicle sense — it stands for a man who
+     * is prone, concealed and a long way off, where rifle fire arriving at the
+     * edge of its own range is mostly noise. It falls away entirely as the
+     * range closes, which keeps the counterplay honest: rush him, flank him, or
+     * shell him — just do not expect to trade shots with him at 800px. Heavy
+     * ordnance ignores it, because a shell does not care how prone he is. */
+    const fa = !t.isHole && UNITS[t.key] && UNITS[t.key].farArmour;
+    if (fa && !opts.heavy && killer && killer.x != null) {
+      const r = UNITS[t.key].range || 700;
+      const far = clamp((Math.abs(killer.x - t.x) - r * 0.30) / (r * 0.55), 0, 1);
+      dmg *= 1 - fa * far;
+    }
+    t.hp -= dmg;
+    if (t.hp <= 0 && t.deadT == null) this._kill(t, killer, opts);
+    else if (t.deadT == null && !t.isHole) {
+      /* One flinch per burst, not one per round.
+       *
+       * A man under sustained fire was taking a fresh 0.16s flinch on every
+       * bullet, so the animation ran idle>hit>idle>hit… — measured at 37 clip
+       * changes a minute on the worst man, the single largest remaining source
+       * of visible chatter. The flinch is deliberately exempt from the clip
+       * dwell (being shot has to register on the frame it happens), so the
+       * limit has to live here instead: react, then absorb the rest of the
+       * burst. */
+      if ((t.hitCd || 0) <= 0) {
+        t.hitT = Math.max(t.hitT || 0, 0.16);
+        t.hitCd = 0.62;
+      }
+    }
+  }
+
+  _kill(t, killer, opts = {}) {
+    if (t.isHole) {
+      t.deadT = 0;
+      this.fx.explosion(t.x, t.y, 26, { shake: 2 });
+      this.holes.splice(this.holes.indexOf(t), 1);
+      if (killer) this.stats[killer.side || killer].kills++;
+      this.emit('SPIDER HOLE DESTROYED', 'us');
+      return;
+    }
+    t.deadT = 0;
+    t.aiming = false;
+    if (UNITS[t.key] && UNITS[t.key].vehicle) {
+      // a knocked-out track brews up; no corpse, no blood
+      t.baked = true;
+      this.fx.explosion(t.x, t.y - 14, 62, { shake: 9 });
+      this.fx.punch(0.1, killer && killer.x != null ? Math.sign(t.x - killer.x) : 0, -0.2);
+      this.emit(`APC KNOCKED OUT — LANE ${t.lane + 1}`, t.side === this.player ? 'vc' : 'us');
+    }
+    /* A moment of near-freeze so a kill lands. Only when the player can actually
+     * see it — stopping the clock for something off-screen is just a stutter. */
+    if (Camera.sees(t.x, 80)) {
+      const dx = killer && killer.x != null ? Math.sign(t.x - killer.x) : 0;
+      this.fx.punch(opts.gib ? 0.085 : 0.05, dx, -0.25);
+      this.fx.shake = Math.min(14, this.fx.shake + (opts.gib ? 5 : 2));
+    }
+    if (opts.gib) {
+      t.gibbed = true;
+      t.baked = true;
+      const scale = LANE_DEPTH[t.lane];
+      this.fx.gibs(t.x, t.y, scale, t.y + 2);
+      this.fx.bakeCorpse(t, { gibbed: true });
+    } else if (Math.random() < 0.3) {
+      t.wounded = true; // drags himself a few meters before he stops
+    }
+    const medK = (typeof Perks !== 'undefined' && Perks.on(this, t.side, 'medics')) ? 0.72 : 1;
+    this.morale[t.side] -= (t.cpShare || UNITS[t.key].cost) * MORALE_LOSS[t.side] * medK;
+    this.stats[t.side].losses++;
+    const ks = killer ? (killer.side || killer) : other(t.side);
+    if (ks !== t.side) this.stats[ks].kills++;
+    // the squad that did it gets the credit
+    if (killer && killer.squad && ks !== t.side) {
+      const sq = killer.squad;
+      sq.xp = (sq.xp || 0) + 1;
+      const nr = rankOf(sq.xp);
+      if (nr > (sq.rank || 0)) {
+        sq.rank = nr;
+        this.fx.floater(this.squadAnchor(sq), groundY(this.map, sq.lane, sq.x) - 62,
+          RANKS[nr].name, sq.side === 'us' ? '#b5c98f' : '#e08767', true);
+        if (sq.side === this.player) this.emit(`SQUAD PROMOTED — ${RANKS[nr].name}`, 'us');
+      }
+    }
+    if (killer && killer.key && (this.isConcealed(killer) || killer.isHole)) {
+      this.hiddenLoss[t.lane]++;
+    }
+    if (killer && killer.isHole) this.hiddenLoss[t.lane]++;
+  }
+
+  _updateUnits(dt) {
+    const map = this.map;
+    for (let i = this.units.length - 1; i >= 0; i--) {
+      const u = this.units[i];
+      if (u.deadT != null) {
+        u.deadT += dt;
+        if (u.wounded && u.deadT > 0.25 && u.deadT < 2.3) {
+          u.x -= u.dir * 7 * dt; // crawls back the way he came
+          u.y = groundY(map, u.lane, u.x);
+          if (Math.random() < dt * 2.4) this.fx.addDecal(u.lane, u.x + rand(-2, 2), 'drip', 1);
+        }
+        const bakeAt = u.wounded ? 2.4 : 0.9;
+        if (u.deadT > bakeAt && !u.baked) {
+          u.baked = true;
+          this.fx.bakeCorpse(u, { gibbed: u.gibbed });
+        }
+        if (u.deadT > (u.gibbed ? 0.05 : u.wounded ? 3.0 : 1.5)) this.units.splice(i, 1);
+        continue;
+      }
+      /* Mid-crossing a man is drawn between the two lane baselines. `lane` is
+       * already the DESTINATION, so this walks him in from where he came. */
+      if ((u.crossT || 0) > 0) {
+        u.crossT = Math.max(0, u.crossT - dt);
+        const k = 1 - u.crossT / CROSS_TIME;          // 0 at the start, 1 done
+        const e = k * k * (3 - 2 * k);                 // ease, so he does not jerk off
+        const from = groundY(map, u.crossFrom, u.x);
+        const to = groundY(map, u.lane, u.x);
+        u.y = from + (to - from) * e;
+        u.crossK = e;
+        u.moving = true;
+      } else {
+        u.crossK = null;
+        u.y = groundY(map, u.lane, u.x);
+      }
+      u.muzzleT = Math.max(0, u.muzzleT - dt);
+      u.suppressT = Math.max(0, u.suppressT - dt);
+      u.slowT = Math.max(0, u.slowT - dt);
+      u.revealT = Math.max(0, u.revealT - dt);
+      u.spotT = Math.max(0, u.spotT - dt);
+      u.hitT = Math.max(0, (u.hitT || 0) - dt);
+      u.hitCd = Math.max(0, (u.hitCd || 0) - dt);
+      u.combatT = Math.max(0, (u.combatT || 0) - dt);
+      u.transT = Math.max(0, (u.transT || 0) - dt);
+
+      // Stillness feeds concealment (see CONCEAL_SETTLE). Read from last frame's
+      // moving flag, which is set further down this same loop — a frame of lag
+      // is well under the settle time and invisible at any playback rate.
+      u.stillT = u.moving ? 0 : Math.min(2, (u.stillT || 0) + dt);
+
+      // Visibility is eased here rather than in the renderer so it advances once
+      // per sim step instead of once per draw. Appearing is instant — a man who
+      // breaks cover or opens fire is seen NOW — while slipping out of sight
+      // dissolves, so the brush reads as swallowing him rather than deleting him.
+      const seen = this.visibleToPlayer(u) || u.combatT > 0 || u.muzzleT > 0;
+      if (u.visA == null) u.visA = seen ? 1 : 0;
+      u.visA = seen ? 1 : Math.max(CONCEAL_FLOOR, u.visA - dt / CONCEAL_FADE);
+
+      if (u.emergeT > 0) { u.emergeT -= dt; u.moving = false; continue; }
+
+      const d = UNITS[u.key];
+
+      // engineer: defuse enemy works ahead
+      if (d.engineer) {
+        const target = this._engineerTarget(u);
+        if (target) {
+          u.moving = false;
+          target.obj.defuse += dt;
+          if (Math.random() < dt * 6) this.fx.dirtKick(target.obj.x, groundY(map, u.lane, target.obj.x));
+          if (target.obj.defuse >= target.need) {
+            this._removeWork(target.obj);
+            this.fx.floater(target.obj.x, u.y - 30, 'CLEARED', '#b5c98f');
+            Sound.shovel(target.obj.x);
+            this.emit(`ENGINEERS CLEARED ${target.kind.toUpperCase()} — LANE ${u.lane + 1}`, 'us');
+          }
+          continue;
+        }
+      }
+
+      // sapper: charge and detonate
+      if (d.sapper) {
+        const foes = this._targetsFor(u.side, u.lane);
+        let nearest = null, nd = 1e9;
+        for (const f of foes) {
+          const dist = Math.abs(f.x - u.x);
+          if (dist < nd) { nd = dist; nearest = f; }
+        }
+        if (nearest && nd < 38) {
+          this.fx.explosion(u.x, u.y - 6, 55, { shake: 5 });
+          Sound.explosion(0.9, u.x);
+          this._areaDamage(u.lane, u.x, 100, 65, u, 'vc');
+          this.fx.addDecal(u.lane, u.x, 'crater', 16);
+          this._kill(u, null, { gib: true });
+          this.stats.vc.losses--; // died by own hand, don't double count against morale twice
+          this.morale.vc += (u.cpShare || UNITS[u.key].cost) * MORALE_LOSS.vc * 0.5; // sacrifice expected, partial refund
+          this.stats.vc.losses++;
+          continue;
+        }
+      }
+
+      // grenade wind-up and release
+      if ((u.nadeT || 0) > 0) {
+        u.nadeT -= dt;
+        u.moving = false;
+        if (!u.nadeThrown && u.nadeT <= 0.45) {
+          u.nadeThrown = true;
+          const tx = u.nadeTarget != null ? u.nadeTarget : u.x + u.dir * 90;
+          const dist = tx - u.x;
+          const T = 0.85;
+          this.nades.push({
+            x: u.x + u.dir * 8, y: u.y - 30 * LANE_DEPTH[u.lane],
+            vx: dist / T, vy: -0.5 * 620 * T * 0.62, spin: 0,
+            lane: u.lane, side: u.side, landed: false,
+            smoke: !!u.nadeSmoke,
+            // a smoke canister starts pouring the moment it stops rolling
+            fuse: u.nadeSmoke ? 0.25 : GRENADE.fuse,
+          });
+          Sound.shovel(u.x);
+        }
+        if (u.nadeT <= 0) { u.nadeThrown = false; u.nadeTarget = null; u.nadeSmoke = false; }
+        continue;
+      }
+
+      // snipers
+      if (u.sniperUnit) {
+        this._updateSniper(u, dt);
+      } else {
+        u.fireT -= dt;
+        // squads breaking for cover or repositioning hold their fire and run
+        const rushing = (u.crossT || 0) > 0 ||
+          (u.squad && (u.squad.order === 'tocover' || u.squad.order === 'moveto'));
+        const t = !rushing && d.rof > 0 ? this._acquire(u) : null;
+        if (t) {
+          u.moving = false;
+          u.combatT = Math.max(u.combatT, 0.4);
+          if (u.fireT <= 0) this._fire(u, t);
+        } else {
+          this._advance(u, d, dt);
+        }
+      }
+
+      // trap trigger
+      if (u.side === 'us' && u.deadT == null) {
+        for (const t of this.traps) {
+          if (t.lane !== u.lane || Math.abs(t.x - u.x) > 14) continue;
+          this.traps.splice(this.traps.indexOf(t), 1);
+          if (t.type === 'punji') {
+            Sound.trapSpring(u.x);
+            this.fx.floater(u.x, u.y - 40, 'PUNJI PIT', '#e08767', true);
+            this.fx.blood(u.x, u.y, 1);
+            this.fx.addDecal(u.lane, u.x, 'blood', 5);
+            u.slowT = 3;
+            this._damage(u, 26, { side: 'vc' });
+            this.hiddenLoss[u.lane]++;
+          } else {
+            Sound.explosion(0.7, t.x);
+            this.fx.explosion(t.x, u.y, 46, { shake: 4 });
+            this.fx.addDecal(u.lane, t.x, 'crater', 12);
+            this._areaDamage(u.lane, t.x, 75, 46, { side: 'vc' }, 'vc');
+            this.hiddenLoss[u.lane]++;
+          }
+          if (this.player === 'us') this.emit(`TROOPS IN CONTACT — BOOBY TRAP LANE ${u.lane + 1}`, 'vc');
+          break;
+        }
+      }
+
+      // breakthrough
+      if (u.deadT == null) {
+        const goal = u.side === 'us' ? WORLD_W - 42 : 42;
+        if ((u.side === 'us' && u.x >= goal) || (u.side === 'vc' && u.x <= goal)) {
+          const dmg = (u.cpShare || UNITS[u.key].cost) * (UNITS[u.key].sapper ? 0.9 : 0.45);
+          this.morale[other(u.side)] -= dmg;
+          this.fx.floater(u.x, u.y - 40, 'BREAKTHROUGH', u.side === 'us' ? '#b5c98f' : '#e08767', true);
+          this.fx.explosion(u.x, u.y - 8, 40, { shake: 4 });
+          Sound.explosion(0.6, u.x);
+          this.emit(`LINE OVERRUN — LANE ${u.lane + 1}`, u.side);
+          u.deadT = 99; u.baked = true; // gone through the line, not a casualty
+          this.units.splice(i, 1);
+        }
+      }
+    }
+  }
+
+  _advance(u, d, dt) {
+    // men hold formation slots on their squad anchor (compressed inside cover)
+    const s = u.squad;
+    let tx;
+    if (!s) {
+      tx = u.hold ? u.holdX : u.x + u.dir * 1000;
+    } else if (s.inCover && s.cover) {
+      const alive = this.squadAlive(s);
+      const idx = alive.indexOf(u);
+      // Spacing is set by how wide a man actually draws, and the 3D sprites are
+      // far wider than the cut-outs they replaced — a levelled rifle is ~40px on
+      // its own, and a prone man is ~55px long. At the old 12px a fire team in
+      // cover collapsed into a single unreadable blob.
+      const prone = u.pose === 'prone';
+      const want = prone ? 52 : 38;
+      const floor = prone ? 40 : 28;   // a prone man is ~55px long, not ~26
+      const spread = Math.max(floor, Math.min(want, s.cover.w / Math.max(2, alive.length)));
+      tx = s.cover.x - s.dir * (idx - (alive.length - 1) / 2) * spread;
+    } else {
+      /* 34 was not enough room. A man is 84px tall and his levelled rifle is
+       * about 40px wide on its own, so at 34px spacing every soldier overlapped
+       * the next one's weapon — measured 10th-percentile gap between adjacent
+       * men in a lane was 14px, and a zoomed contact showed a ten-man squad as
+       * a single stack of bodies rather than a firing line. A firefight cannot
+       * read if you cannot count the men in it. */
+      tx = s.x - u.dir * u.slot * 50;
+    }
+    const dx = tx - u.x;
+    const marching = s && s._advancing; // the squad itself is on the move
+    /* THE SETTLE DEAD-BAND. 2.5 px was written when slots were 34 px apart and
+     * is far too tight now they are 50: a man had to land within 5% of his
+     * spacing to be considered arrived, and the anchor shifts under him every
+     * frame as the squad separates, so he chased it forever. Measured, 90% of
+     * all man-frames were flagged MOVING, which forces the stance machine to
+     * 'stand' — so the game's three postures almost never showed and every
+     * firefight read as men marching on the spot.
+     *
+     * 9 px is under a fifth of a man's width, so nobody drifts visibly out of
+     * formation, and it lets him actually arrive. */
+    /* THE SETTLE DEAD-BAND IS BACK AT 2.5, and the story is worth keeping.
+     *
+     * It was raised to 9 on the theory that men were chasing a slot they could
+     * never reach and so stayed permanently flagged `moving`, which forces the
+     * stance machine to 'stand'. A single before/after run showed moving
+     * dropping 90.3% -> 70.7% and it was committed on that basis.
+     *
+     * It is not true. A/B on twelve matched runs — six seeds across two maps —
+     * says the dead-band does nothing at all:
+     *
+     *     base 2.5   moving 80.7%   fighting posture 9.3%
+     *     base 9     moving 80.4%   fighting posture 8.1%
+     *     base 16    moving 79.5%   fighting posture 8.6%
+     *
+     * All inside the noise, and a wider band that also suppressed adjustment
+     * while in contact added nothing on top. So the change is reverted rather
+     * than left in place looking load-bearing.
+     *
+     * Kneeling appearing at all was real, and it came from the stance PRIORITY
+     * reorder — the front-rank prone rule used to sit above the kneel and
+     * swallow it — not from this number.
+     *
+     * Men are moving ~80% of the time because squads genuinely cross a lot of
+     * ground before they meet. That is a pacing question about how far a squad
+     * advances before it halts, and it will not be solved by a threshold here.
+     */
+    if (Math.abs(dx) < 2.5 && !marching) {
+      u.moving = false;
+      u.spd = 0;
+      return;
+    }
+    u.moving = true;
+    let sp = d.speed;
+    if (typeof Perks !== 'undefined' && Perks.on(this, u.side, 'scouts')) sp *= 1.18;
+    if (u.suppressT > 0) sp *= 0.5;
+    if (u.slowT > 0) sp *= 0.45;
+    // weight: heavy gunners lumber up to speed, light troops spring
+    const accel = d.mg ? 130 : d.small ? 330 : 230;
+    // arrival ease-in: bleed speed off approaching the slot instead of stopping dead
+    if (!marching) sp = Math.min(sp, Math.abs(dx) * 5 + 10);
+    u.spd = u.spd < sp ? Math.min(sp, (u.spd || 0) + accel * dt) : sp;
+    const step = Math.sign(dx) * Math.min(Math.abs(dx), u.spd * dt);
+    u.x += step;
+    // stride follows the feet — heavier men take shorter, heavier steps
+    const stride = d.mg ? 0.30 : d.small ? 0.245 : 0.262;
+    u.phase += Math.abs(step) * stride;
+    // raw ground covered, so the renderer can size a gait cycle to the distance
+    // actually travelled instead of to a constant baked in here
+    u.dist = (u.dist || 0) + Math.abs(step);
+
+    /* GAIT PHASE — the fix for animation cadence that varied 4.5x.
+     *
+     * The renderer used to derive the frame index as `dist / cycle`, where the
+     * cycle was scaled by the unit's BASE speed. Distance accumulates at the
+     * man's ACTUAL speed, so the two disagreed whenever he was not moving at
+     * his base speed — which is always, when walking. Measured: walk played at
+     * 7.3 fps for the sapper (base 56) and 12.7 for the sniper (base 30), a
+     * 1.74x spread between units, against 31 fps running. A man breaking from
+     * a walk into a run jumped 4.5x in cadence. That is the "mismatched fps".
+     *
+     * Sizing the cycle off CURRENT speed fixes both at once: every unit at a
+     * given speed now shares one cadence, and the walk/run step drops to 1.8x,
+     * which is what the difference between walking and running actually is.
+     *
+     * The exponent is the stride/cadence trade-off. At 1.0 the cycle is exactly
+     * proportional to speed, cadence is dead constant and the feet slide when a
+     * man accelerates. At 0 it is the old distance-locked behaviour with all of
+     * the spread. 0.85 keeps cadence nearly flat while leaving enough distance
+     * coupling that boots still read as gripping the ground.
+     *
+     * Accumulated INCREMENTALLY, and separately per gait, because that is what
+     * lets the cycle length change without popping: `dist / cycle` jumps the
+     * instant the divisor moves, but a phase that is only ever added to cannot.
+     * Both are advanced every frame so switching clip never lands mid-stride on
+     * a stale phase.
+     *
+     * Note there is no lane-depth scaling here, deliberately. The renderer used
+     * `S3_TARGET_H * scale`, which made men in the far lane (depth 0.92) walk
+     * 17% faster in cadence than men in the near lane. Cadence is a property of
+     * the man, not of how far away he is. */
+    const gp = Math.pow(Math.max(u.spd || 0, 6) / S3_REF_SPD, 0.85) * (u.gaitK || 1);
+    const cycW = S3_TARGET_H * S3_WALK_CYCLE * gp;
+    const cycR = S3_TARGET_H * S3_RUN_CYCLE * gp;
+    u.phWalk = ((u.phWalk || 0) + Math.abs(step) / cycW) % 1;
+    u.phRun = ((u.phRun || 0) + Math.abs(step) / cycR) % 1;
+
+    /* Dust off the boots, emitted per STEP rather than per second, so it stays
+     * locked to the stride at any speed. Half a gait cycle is one footfall. */
+    const sc = LANE_DEPTH[u.lane] * (u.sj || 1);
+    const stepLen = 84 * sc * 0.29 * (u.gaitK || 1);
+    u.stepAcc = (u.stepAcc || 0) + Math.abs(step);
+    if (u.stepAcc >= stepLen) {
+      u.stepAcc -= stepLen;
+      if (u.pose !== 'prone' && Camera.sees(u.x, 60)) {
+        this.fx.footDust(u.x - u.dir * 4 * sc, u.y + 1, sc, u.dir);
+      }
+    }
+  }
+
+  _updateSniper(u, dt) {
+    const d = UNITS[u.key];
+    u.glintT -= dt;
+    if (u.aiming) {
+      const t = u.aimTarget;
+      const valid = t && t.deadT == null && t.lane === u.lane && this.canSee(u.side, t) &&
+        Math.abs(t.x - u.x) < d.range * 1.1 &&
+        (!t.isHole || this.holes.includes(t)) &&
+        (t.isHole || this.units.includes(t));
+      if (!valid) {
+        u.aiming = false; u.aimTarget = null; u.pose = null;
+        return;
+      }
+      u.moving = false;
+      u.pose = 'prone';
+      u.combatT = Math.max(u.combatT, 0.4);
+      // mutual aim = duel
+      if (t.sniperUnit && t.aimTarget === u && !u.duelFlag) {
+        u.duelFlag = t.duelFlag = true;
+        this.setBanner('SNIPER DUEL', false);
+        Sound.glintPing();
+      }
+      const elevAdv = elevAt(this.map, u.lane, u.x) - elevAt(this.map, t.lane, t.x);
+      u.aimT += dt * (1 + 0.35 * clamp(elevAdv, -0.9, 0.9));
+      if (u.glintT <= 0) {
+        const scale = LANE_DEPTH[u.lane];
+        this.fx.glint(u.x + u.dir * 12 * scale, u.y - 7 * scale);
+        u.glintT = 0.45;
+      }
+      if (u.aimT >= u.aimTime) {
+        const scale = LANE_DEPTH[u.lane];
+        const mx = u.x + u.dir * 24 * scale, my = u.y - 6 * scale;
+        Sound.sniperShot(mx);
+        this.fx.muzzle(mx, my, u.dir, scale * 1.4);
+        this.fx.tracer(mx, my, t.x, t.y - (t.isHole ? 2 : 14), '#fff0c8');
+        if (t.isHole) this._damage(t, 80, u);
+        else {
+          this._damage(t, 999, u, { gib: Math.random() < 0.35 });
+          this.fx.blood(t.x, t.y, 1.4);
+          this.fx.addDecal(t.lane, t.x, 'blood', 5);
+          if (t.sniperUnit && t.duelFlag) {
+            this.setBanner('DUEL WON', false);
+            this.fx.floater(u.x, u.y - 44, 'DUEL WON', '#ffd98a', true);
+          }
+        }
+        u.aiming = false; u.aimTarget = null; u.pose = null;
+        u.duelFlag = false;
+        u.fireT = 3.5;
+        if (u.side === 'vc' && UNITS[u.key].conceal) u.revealT = 6.5;
+      }
+      return;
+    }
+    u.pose = null;
+    u.fireT -= dt;
+    const t = this._acquire(u);
+    if (t && u.fireT <= 0) {
+      u.aiming = true;
+      u.aimT = 0;
+      u.aimTarget = t;
+      u.moving = false;
+    } else {
+      this._advance(u, d, dt);
+    }
+  }
+
+  _engineerTarget(u) {
+    const works = [];
+    for (const t of this.traps) if (t.side !== u.side && t.lane === u.lane) works.push({ obj: t, need: 1.6, kind: 'trap' });
+    for (const tn of this.tunnels) if (tn.lane === u.lane) works.push({ obj: tn, need: 3, kind: 'tunnel' });
+    for (const h of this.holes) if (h.lane === u.lane && (h.discovered || h.revealT > 0)) works.push({ obj: h, need: 2.2, kind: 'spider hole' });
+    for (const w of works) {
+      const dx = (w.obj.x - u.x) * u.dir;
+      if (dx > -14 && dx < 62) return w;
+    }
+    return null;
+  }
+
+  _removeWork(obj) {
+    let idx = this.traps.indexOf(obj);
+    if (idx >= 0) { this.traps.splice(idx, 1); return; }
+    idx = this.tunnels.indexOf(obj);
+    if (idx >= 0) { this.tunnels.splice(idx, 1); return; }
+    idx = this.holes.indexOf(obj);
+    if (idx >= 0) this.holes.splice(idx, 1);
+  }
+
+  /* ---------- spider holes ---------- */
+  _updateHoles(dt) {
+    for (let i = this.holes.length - 1; i >= 0; i--) {
+      const h = this.holes[i];
+      h.cd -= dt;
+      h.revealT = Math.max(0, h.revealT - dt);
+      h.y = groundY(this.map, h.lane, h.x) - 5;
+      if (h.cd > 0) continue;
+      let best = null, nd = 1e9;
+      for (const u of this.units) {
+        if (u.side !== 'us' || u.deadT != null || u.lane !== h.lane) continue;
+        const dist = Math.abs(u.x - h.x);
+        if (dist < 300 && dist < nd) { nd = dist; best = u; }
+      }
+      if (best) {
+        h.dirToTarget = Math.sign(best.x - h.x) || -1;
+        Sound.sniperShot(h.x);
+        this.fx.muzzle(h.x + h.dirToTarget * 10, h.y - 2, h.dirToTarget, 1);
+        this.fx.tracer(h.x, h.y - 2, best.x, best.y - 14, '#fff0c8');
+        this.fx.blood(best.x, best.y, 1);
+        this._damage(best, 55, h);
+        this.fx.floater(h.x, h.y - 26, 'AMBUSH!', '#e08767');
+        h.revealT = 2.6;
+        h.cd = 4.5;
+        if (this.player === 'us') this.emit(`SNIPER FIRE — LANE ${h.lane + 1}`, 'vc');
+      }
+    }
+  }
+
+  /* ---------- strikes ---------- */
+  _updateStrikes(dt) {
+    for (let i = this.strikes.length - 1; i >= 0; i--) {
+      const s = this.strikes[i];
+      s.age += dt;
+      if (s.impacts) {
+        for (const im of s.impacts) {
+          if (!im.done && s.age >= im.t) {
+            im.done = true;
+            const y = groundY(this.map, s.lane, im.x);
+            this.fx.explosion(im.x, y, im.r, {});
+            this.fx.addDecal(s.lane, im.x, 'crater', im.r * 0.28);
+            if (im.r >= 60) this.addCover(s.lane, im.x, 'crater'); // shellholes become cover
+            Sound.explosion(s.type === 'arclight' ? 1.3 : 1, im.x);
+            this.tryBirds(im.x);
+            if (s.type === 'arclight') this.fx.flash = Math.max(this.fx.flash, 0.18);
+            this._areaDamage(s.lane, im.x, im.r, im.dmg, { side: s.side }, s.side);
+          }
+        }
+      }
+      if (s.type === 'napalm' && !s.dropped && s.age >= s.dropT) {
+        s.dropped = true;
+        const y = groundY(this.map, s.lane, s.x);
+        Sound.napalmWhoosh(s.x);
+        this.fx.napalmBurst(s.x, y, 320);
+        this.fx.addDecal(s.lane, s.x, 'scorch', 110);
+        this.fires.push({ lane: s.lane, x0: s.x - 170, x1: s.x + 170, t: 0, dur: 7, dps: 24 });
+        this._burnStrip(s.lane, s.x - 170, s.x + 170);
+        this._areaDamage(s.lane, s.x, 175, 40, { side: s.side }, s.side);
+      }
+      if (s.type === 'medevac' && !s.healed && s.age >= 2.4) {
+        s.healed = true;
+        this.morale[s.side] = clamp(this.morale[s.side] + 14, 0, 100);
+        this.fx.floater(Camera.x + CANVAS_W / 2, 200, 'WOUNDED EVACUATED  +14 MORALE', '#b5c98f', true);
+      }
+      if (s.type === 'aircav' && !s.dropped && s.age >= 3.0) {
+        s.dropped = true;
+        this.trySpawn(s.side, 'rifles', s.lane, { free: true, x: s.x - 12 });
+        this.trySpawn(s.side, 'weapons', s.lane, { free: true, x: s.x + 18 });
+        this.fx.smokePuff(s.x, groundY(this.map, s.lane, s.x) - 10);
+      }
+      if (s.age >= s.dur) this.strikes.splice(i, 1);
+    }
+  }
+
+  _areaDamage(lane, x, r, dmg, killer, killerSide) {
+    for (const u of this.units) {
+      if (u.lane !== lane || u.deadT != null) continue;
+      const dist = Math.abs(u.x - x);
+      if (dist > r) continue;
+      let k = 1 - 0.6 * (dist / r);
+      // cover helps a little against blast — most of its value is vs small arms
+      if (u.squad && u.squad.inCover && u.squad.cover) k *= 1 - u.squad.cover.prot * 0.3;
+      // blast is `heavy`: armour is no defence against a satchel, mine or shell
+      this._damage(u, dmg * k, { side: killerSide }, { gib: dmg * k >= 30, heavy: true });
+      if (u.deadT == null) u.suppressT = Math.max(u.suppressT, 1);
+      if (u.squad) {
+        u.squad.pin += 0.5;
+        u.squad.underFireT = Math.max(u.squad.underFireT, 2);
+      }
+    }
+    for (let j = this.holes.length - 1; j >= 0; j--) {
+      const h = this.holes[j];
+      if (h.lane === lane && Math.abs(h.x - x) < r * 0.85) {
+        h.hp -= dmg;
+        if (h.hp <= 0) this._kill(h, killerSide);
+      }
+    }
+    for (const st of this.structures) {
+      if (st.lane === lane && Math.abs(st.x - x) < r * 0.9 + st.w / 2) {
+        this._hurtStructure(st, dmg * 0.8, dmg >= 38);
+      }
+    }
+    for (let j = this.traps.length - 1; j >= 0; j--) {
+      const t = this.traps[j];
+      if (t.lane === lane && Math.abs(t.x - x) < r * 0.7) this.traps.splice(j, 1);
+    }
+    for (let j = this.tunnels.length - 1; j >= 0; j--) {
+      const tn = this.tunnels[j];
+      if (tn.lane === lane && Math.abs(tn.x - x) < r * 0.7) {
+        tn.hp -= dmg;
+        if (tn.hp <= 0) {
+          this.tunnels.splice(j, 1);
+          this.fx.floater(tn.x, groundY(this.map, lane, tn.x) - 20, 'TUNNEL COLLAPSED', '#ffd98a');
+        }
+      }
+    }
+  }
+
+  _burnStrip(lane, x0, x1) {
+    let changed = false;
+    for (const z of this.conceal[lane]) {
+      if (z.burned) continue;
+      const zx0 = z.x0 * WORLD_W, zx1 = z.x1 * WORLD_W;
+      if (zx0 < x1 && zx1 > x0) { z.burned = true; changed = true; }
+    }
+    if (changed) {
+      Renderer.markDirty(lane);
+      this.emit(`COVER BURNED OFF — LANE ${lane + 1}`, 'us');
+    }
+  }
+
+  _updateFires(dt) {
+    for (let i = this.fires.length - 1; i >= 0; i--) {
+      const f = this.fires[i];
+      f.t += dt;
+      if (f.t > f.dur) { this.fires.splice(i, 1); continue; }
+      if (Math.random() < dt * 26) this.fx.fireTick(f.x0, f.x1, f.lane, this.map);
+      for (const u of this.units) {
+        if (u.lane === f.lane && u.deadT == null && u.x > f.x0 && u.x < f.x1) {
+          this._damage(u, f.dps * dt, { side: 'us' });
+        }
+      }
+    }
+  }
+
+  /* ---------- structures ---------- */
+  _hurtStructure(st, dmg, burn) {
+    if (st.state >= 2) return;
+    st.hp -= dmg;
+    if (burn && st.kind !== 'bunker' && st.kind !== 'well') st.burnT = Math.max(st.burnT, 8);
+    if (st.hp <= st.maxHp * 0.5 && st.state === 0) {
+      st.state = 1;
+      this.fx.smokePuff(st.x, groundY(this.map, st.lane, st.x) - 12);
+    }
+    if (st.hp <= 0) {
+      st.state = 2;
+      st.burnT = Math.min(st.burnT, 2.5);
+      const y = groundY(this.map, st.lane, st.x);
+      this.fx.explosion(st.x, y - 6, 30, { shake: 2 });
+      this.fx.addDecal(st.lane, st.x, 'scorch', st.w * 0.5);
+      Sound.explosion(0.45, st.x);
+      if (st.kind === 'bunker') this.emit(`BUNKER DESTROYED — LANE ${st.lane + 1}`, 'sys');
+      // a levelled building is a fighting position — towns become cover
+      const deco = ['well', 'hay', 'banana', 'cart', 'shrine', 'stall'];
+      if (!deco.includes(st.kind)) this.addCover(st.lane, st.x, 'rubble');
+      // a destroyed emplacement takes its strongpoint with it
+      for (const laneCovers of this.covers) {
+        const ci = laneCovers.findIndex(c => c.structRef === st);
+        if (ci >= 0) {
+          const c = laneCovers[ci];
+          if (c.occ) {
+            const s = c.occ;
+            s.cover = null; s.inCover = false; s.order = 'advance';
+            s.pin += 0.5; s.underFireT = 2;
+          }
+          laneCovers.splice(ci, 1);
+          this.emit(`STRONGPOINT DESTROYED — LANE ${st.lane + 1}`, 'sys');
+        }
+      }
+    }
+  }
+
+  _updateStructures(dt) {
+    for (const st of this.structures) {
+      if (st.burnT > 0) {
+        st.burnT -= dt;
+        st.fireHurt += dt;
+        if (st.fireHurt > 0.5) {
+          st.fireHurt = 0;
+          this._hurtStructure(st, 6, false);
+        }
+        if (Math.random() < dt * 5) {
+          const y = groundY(this.map, st.lane, st.x);
+          this.fx.fireTick(st.x - st.w / 2, st.x + st.w / 2, st.lane, this.map);
+          if (Math.random() < 0.5) this.fx.smokePuff(st.x + rand(-st.w / 3, st.w / 3), y - rand(14, 26));
+        }
+      }
+      // standing fires ignite what they touch
+      if (st.state < 2 && st.burnT <= 0) {
+        for (const f of this.fires) {
+          if (f.lane === st.lane && st.x > f.x0 - 12 && st.x < f.x1 + 12) st.burnT = 8;
+        }
+      }
+    }
+  }
+
+  /* ---------- ambient life ---------- */
+  _ambient(dt) {
+    // birds scatter from the treeline when fighting is close
+    this.birdT -= dt;
+    // background smoke columns beyond the ridge
+    for (const s of this.smokeSrc) {
+      s.t -= dt;
+      if (s.t <= 0) {
+        s.t = rand(0.5, 1.1);
+        this.fx.add({
+          x: s.x + rand(-6, 6), y: 342, vx: rand(-4, 4), vy: rand(-14, -8), g: -2,
+          t: 0, life: rand(3.5, 6), size: rand(9, 16), color: 'dark', type: 'smoke', drag: 0.3,
+        });
+      }
+    }
+    // an occasional patrol flight crossing the AO
+    this.patrolT -= dt;
+    if (this.patrolT <= 0) {
+      this.patrolT = rand(55, 95);
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      this.strikes.push({
+        type: 'patrol', age: 0, dur: (WORLD_W + 400) / 170,
+        x: dir > 0 ? -180 : WORLD_W + 180, dirX: dir, y: rand(80, 140), heard: false,
+      });
+    }
+  }
+
+  tryBirds(x) {
+    if (this.birdT > 0 || this.map.treeDensity < 0.3) return;
+    this.birdT = rand(9, 18);
+    this.fx.birds(x + rand(-60, 60), LANE_BASE[0] - rand(60, 110));
+  }
+
+  /* ---------- flags ---------- */
+  _updateFlags(dt) {
+    for (const f of this.flags) {
+      let usN = 0, vcN = 0;
+      for (const u of this.units) {
+        if (u.lane !== f.lane || u.deadT != null) continue;
+        if (Math.abs(u.x - f.x) < 100) u.side === 'us' ? usN++ : vcN++;
+      }
+      const side = usN > 0 && vcN === 0 ? 'us' : vcN > 0 && usN === 0 ? 'vc' : null;
+      if (side && f.owner !== side) {
+        if (f.capSide !== side) { f.capSide = side; f.cap = 0; }
+        f.cap += dt * 0.3;
+        if (f.cap >= 1) {
+          f.owner = side;
+          f.cap = 0; f.capSide = null;
+          Sound.radio();
+          this.fx.floater(f.x, groundY(this.map, f.lane, f.x) - 50, 'FLAG SECURED', side === 'us' ? '#b5c98f' : '#e08767', true);
+          this.emit(`OBJECTIVE ${side === 'us' ? 'SECURED BY US' : 'TAKEN BY VC'} — LANE ${f.lane + 1}`, side);
+        }
+      } else if (!side) {
+        f.cap = Math.max(0, f.cap - dt * 0.25);
+        if (f.cap === 0) f.capSide = null;
+      }
+    }
+  }
+
+  /* ---------- AI ---------- */
+  _lanePower(side, lane) {
+    let p = 0;
+    for (const u of this.units) {
+      if (u.side === side && u.lane === lane && u.deadT == null) p += u.cpShare || UNITS[u.key].cost;
+    }
+    if (side === 'vc') for (const h of this.holes) if (h.lane === lane) p += 20;
+    return p;
+  }
+
+  _aiUpdate(dt) {
+    this.aiT -= dt;
+    if (this.aiT > 0 || this.over) return;
+    this.aiT = this.diff.aiInterval * rand(0.7, 1.3);
+    if (Math.random() < this.diff.mistake) return;
+
+    const side = this.aiSide, foe = other(side);
+    const cp = this.cp[side];
+    const powers = LANES.map(l => ({
+      lane: l,
+      mine: this._lanePower(side, l),
+      theirs: this._lanePower(foe, l),
+    }));
+    powers.sort((a, b) => (b.theirs - b.mine) - (a.theirs - a.mine));
+    const hot = powers[0];
+    const weak = powers[powers.length - 1];
+
+    if (side === 'us') this._aiUS(cp, hot, weak);
+    else this._aiVC(cp, hot, weak);
+
+    // spawn decision
+    const laneToSpawn = hot.theirs > hot.mine * 1.1 ? hot.lane
+      : this.flags.find(f => f.owner !== side) ? this.flags.find(f => f.owner !== side).lane
+      : weak.lane;
+    const key = this._aiPickUnit(side, laneToSpawn);
+    if (key) this.trySpawn(side, key, laneToSpawn);
+
+    // squad abilities: grenade dug-in enemies, suppress massed ones
+    for (const s of this.squads) {
+      if (s.side !== side || !this.squadAlive(s).length) continue;
+      const sd = SQUADS[s.key];
+      if (sd.grenades && (s.nadeCd || 0) <= 0) {
+        for (const o of this.squads) {
+          if (o.side === side || o.lane !== s.lane || !o.inCover) continue;
+          if (!this.squadAlive(o).length) continue;
+          if (Math.abs(this.squadAnchor(o) - s.x) < GRENADE.range && Math.random() < 0.55) {
+            this._squadGrenade(s);
+            break;
+          }
+        }
+      }
+      if (sd.suppressive && (s.suppCd || 0) <= 0) {
+        const close = this.squads.filter(o => o.side !== side && o.lane === s.lane &&
+          this.squadAlive(o).length && Math.abs(this.squadAnchor(o) - s.x) < 270);
+        if (close.length >= 2) this._squadSuppress(s);
+      }
+
+      /* CONCENTRATE ON WHAT IS ALREADY HURT.
+       *
+       * The AI had every tactical tool the player has and used two of them. It
+       * fired the way an untrained squad does — every man for himself — so its
+       * damage spread across a line and wounded three squads instead of
+       * removing one. Finishing a squad is worth far more than hurting several,
+       * because a dead squad stops shooting back. */
+      if (!s.focus || !this.squadAlive(s.focus).length) {
+        let pick = null, bestScore = -1e9;
+        for (const o of this.squads) {
+          if (o.side === side || o.lane !== s.lane) continue;
+          const men = this.squadAlive(o);
+          if (!men.length) continue;
+          const dist = Math.abs(this.squadAnchor(o) - s.x);
+          if (dist > 340) continue;
+          if (!men.some(m => this.canSee(side, m))) continue;
+          const full = (SQUADS[o.key] && SQUADS[o.key].comp.length) || men.length;
+          const hurt = 1 - men.length / full;
+          const score = hurt * 420 - dist;
+          if (score > bestScore) { bestScore = score; pick = o; }
+        }
+        if (pick) s.focus = pick;
+      }
+
+      /* A MAULED SQUAD PULLS BACK instead of feeding itself in.
+       *
+       * Squads advanced until they were dead, which reads as stupid rather than
+       * aggressive and hands the player free kills. Below a third strength and
+       * under fire, they go to ground behind the nearest cover.
+       *
+       * `playerHeld` is cleared afterwards: orderSquad sets it to mean "a human
+       * chose this", and leaving it set on an AI squad would freeze it out of
+       * its own advance logic for the rest of the match. */
+      const full = (sd.comp && sd.comp.length) || 1;
+      const left = this.squadAlive(s).length;
+      if (left && left / full <= 0.34 && !s.ceding &&
+          (s.underFireT || 0) > 0 && Math.random() < 0.4) {
+        this.orderSquad(s, 'fallback');
+        s.playerHeld = false;
+      }
+
+      /* FLANK: a squad standing in a lane it has already won is worth more in
+       * the lane that is losing.
+       *
+       * Without this the AI can win one lane decisively, lose the other, and
+       * lose the match — because it has no way to move the surplus. It only
+       * crosses when the sums are clear both ways (comfortably ahead here,
+       * clearly behind there), and never out of cover it is holding, so it does
+       * not wander out of a good position for a marginal gain. */
+      if (LANE_N > 1 && (s.crossT || 0) <= 0 && !s.inCover && left) {
+        const oLane = s.lane === 0 ? 1 : 0;
+        const here = this._lanePower(side, s.lane), hereFoe = this._lanePower(foe, s.lane);
+        const there = this._lanePower(side, oLane), thereFoe = this._lanePower(foe, oLane);
+        if (here > hereFoe * 1.6 && thereFoe > there * 1.25 && Math.random() < 0.22) {
+          this.orderSquad(s, 'crosslane');
+          s.playerHeld = false;
+        }
+      }
+    }
+  }
+
+  _visibleFoesIn(lane, forSide) {
+    const out = [];
+    for (const u of this.units) {
+      if (u.side !== forSide && u.deadT == null && u.lane === lane && this.canSee(forSide, u)) out.push(u);
+    }
+    return out;
+  }
+
+  _aiUS(cp, hot, weak) {
+    const side = 'us';
+    // artillery / arclight on clusters
+    for (const l of LANES) {
+      const foes = this._visibleFoesIn(l, side);
+      if (foes.length >= 3 && cp >= CALLINS.arty.cost && (this.cool[side].arty || 0) <= 0) {
+        const cx = foes.reduce((s, u) => s + u.x, 0) / foes.length;
+        const cluster = foes.filter(u => Math.abs(u.x - cx) < 150);
+        if (cluster.length >= 3) { this.tryCallin(side, 'arty', l, cx); return; }
+      }
+      if (foes.length >= 6 && cp >= CALLINS.arclight.cost && (this.cool[side].arclight || 0) <= 0) {
+        const cx = foes.reduce((s, u) => s + u.x, 0) / foes.length;
+        this.tryCallin(side, 'arclight', l, cx);
+        return;
+      }
+    }
+    // napalm where hidden threats hurt us
+    let worst = 0, worstLane = -1;
+    for (const l of LANES) if (this.hiddenLoss[l] > worst) { worst = this.hiddenLoss[l]; worstLane = l; }
+    if (worst >= 2 && cp >= CALLINS.napalm.cost && (this.cool[side].napalm || 0) <= 0) {
+      const zone = this.conceal[worstLane].find(z => !z.burned);
+      if (zone) {
+        this.hiddenLoss[worstLane] = 0;
+        this.tryCallin(side, 'napalm', worstLane, ((zone.x0 + zone.x1) / 2) * WORLD_W);
+        return;
+      }
+    }
+    if (this.morale.us < 58 && cp >= CALLINS.medevac.cost && (this.cool[side].medevac || 0) <= 0) {
+      this.tryCallin(side, 'medevac', null, null);
+      return;
+    }
+    const contested = this.flags.find(f => f.owner !== 'us');
+    if (contested && cp >= CALLINS.aircav.cost + 40 && (this.cool[side].aircav || 0) <= 0 && this.time > 90) {
+      this.tryCallin(side, 'aircav', contested.lane, clamp(contested.x - 80, WORLD_W * 0.1, WORLD_W * 0.9));
+    }
+  }
+
+  _aiVC(cp, hot, weak) {
+    const side = 'vc';
+    // trap seeding ahead of the US advance
+    if (cp >= 30 && (this.cool[side].punji || 0) <= 0 && Math.random() < 0.65) {
+      // randi is INCLUSIVE at both ends, so the old randi(0, 2) kept returning
+      // lane 2 after the drop to LANE_N = 2
+      const lane = randi(0, LANE_N - 1);
+      const front = this._usFront(lane);
+      const x = clamp(front + rand(140, 420), WORLD_W * 0.1, WORLD_W * 0.9);
+      this.tryCallin(side, 'punji', lane, x);
+      return;
+    }
+    if (cp >= 45 && (this.cool[side].mine || 0) <= 0 && Math.random() < 0.4) {
+      const lane = hot.lane;
+      const front = this._usFront(lane);
+      this.tryCallin(side, 'mine', lane, clamp(front + rand(160, 380), WORLD_W * 0.1, WORLD_W * 0.9));
+      return;
+    }
+    if (cp >= CALLINS.spiderhole.cost + 20 && (this.cool[side].spiderhole || 0) <= 0 && this.holes.length < 4) {
+      const lane = hot.lane;
+      const front = this._usFront(lane);
+      // bury on the highest ground ahead of their advance
+      let bestX = 0, bestE = -1;
+      for (let x = front + 180; x < WORLD_W * 0.9; x += 60) {
+        const e = elevAt(this.map, lane, x);
+        if (e > bestE) { bestE = e; bestX = x; }
+      }
+      if (bestX > 0) { this.tryCallin(side, 'spiderhole', lane, bestX); return; }
+    }
+    if (cp >= CALLINS.tunnel.cost + 30 && (this.cool[side].tunnel || 0) <= 0 && this.time > 100) {
+      const lane = weak.lane;
+      if (!this.tunnels.some(t => t.lane === lane)) {
+        this.tryCallin(side, 'tunnel', lane, WORLD_W * rand(0.5, 0.62));
+      }
+    }
+  }
+
+  _usFront(lane) {
+    let front = BASE_X.us;
+    for (const u of this.units) {
+      if (u.side === 'us' && u.deadT == null && u.lane === lane) front = Math.max(front, u.x);
+    }
+    return front;
+  }
+
+  _aiPickUnit(side, lane) {
+    const cp = this.cp[side];
+    const foes = this._visibleFoesIn(lane, side);
+    const mySquads = this.squads.filter(s => s.side === side && this.squadAlive(s).length).length;
+    if (mySquads >= MAX_SQUADS) return null;   // shared with the player, see MAX_SQUADS
+    const foeSniper = foes.some(u => u.sniperUnit);
+    const foeMg = foes.some(u => UNITS[u.key] && UNITS[u.key].mg);
+    const cool = k => (this.cool[side][k] || 0) <= 0;
+    const afford = k => cp >= SQUADS[k].cost;
+
+    if (side === 'us') {
+      if (this.hiddenLoss[lane] >= 1 && cool('engineers') && afford('engineers') && Math.random() < 0.5) return 'engineers';
+      if (foeSniper && cool('snipers') && afford('snipers')) return 'snipers';
+      if (foes.length >= 3 && cool('weapons') && afford('weapons')) return 'weapons';
+      if (this.map.id !== 'iadrang' && cool('lrrp') && afford('lrrp') && Math.random() < 0.3) return 'lrrp';
+      if (cool('rifles') && afford('rifles')) return 'rifles';
+      if (cool('arvnsq') && afford('arvnsq')) return 'arvnsq';
+    } else {
+      const foeArmour = foes.some(u => UNITS[u.key] && UNITS[u.key].armour);
+      if (foeArmour && cool('rpgteam') && afford('rpgteam')) return 'rpgteam';
+      if (foeSniper && cool('marksmanu') && afford('marksmanu')) return 'marksmanu';
+      if (foeMg && cool('sapperu') && afford('sapperu') && Math.random() < 0.6) return 'sapperu';
+      if (foes.length >= 3 && cool('rpdteam') && afford('rpdteam')) return 'rpdteam';
+      if (cool('nvasq') && afford('nvasq') && Math.random() < 0.5) return 'nvasq';
+      if (cool('cell') && afford('cell')) return 'cell';
+      if (cool('nvasq') && afford('nvasq')) return 'nvasq';
+    }
+    return null;
+  }
+
+  objectiveText() {
+    if (this.mode === 'siege') {
+      const left = Math.max(0, this.timeLimit - this.time);
+      const m = Math.floor(left / 60), s = Math.floor(left % 60);
+      return `SIEGE — RELIEF IN ${m}:${s.toString().padStart(2, '0')}`;
+    }
+    if (this.mode === 'assault') {
+      const left = Math.max(0, this.timeLimit - this.time);
+      const m = Math.floor(left / 60), s = Math.floor(left % 60);
+      return `ASSAULT — TAKE ALL FLAGS · ${m}:${s.toString().padStart(2, '0')}`;
+    }
+    return 'BREAK ENEMY MORALE';
+  }
+}

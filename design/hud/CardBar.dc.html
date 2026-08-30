@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #0d1108; font-family: 'Courier New', Courier, monospace; }
+    a { color: #c9a86a; } a:hover { color: #e0c48c; }
+    .stencil { font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif; }
+    .card {
+      position: relative; width: 78px; height: 84px; flex-shrink: 0;
+      display: flex; flex-direction: column; align-items: center; padding-top: 3px;
+      background:
+        radial-gradient(circle at 6% 8%, rgba(201,168,106,.85) 0 5%, transparent 6%),
+        radial-gradient(circle at 94% 8%, rgba(201,168,106,.85) 0 5%, transparent 6%),
+        linear-gradient(180deg, #3c4a2b 0%, #2f3a22 60%, #26301b 100%);
+      border: 1px solid #55643a; border-radius: 3px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 2px 6px rgba(0,0,0,.45);
+    }
+    .card-name { font-family: Impact, Haettenschweiler, sans-serif; font-size: 9.5px; letter-spacing: .5px; color: #e6dfbe; margin-top: 2px; white-space: nowrap; }
+    .card-cost { font-size: 11px; color: #c9a86a; font-weight: bold; }
+    .well { width: 52px; height: 34px; background: linear-gradient(180deg, #202a16, #161d0f);
+            border: 1px solid rgba(201,168,106,.30); display: block; }
+    .pip { width: 5px; height: 5px; display: block; background: rgba(216,210,176,.18); }
+    .grp { font-family: Impact, Haettenschweiler, sans-serif; font-size: 10px; letter-spacing: 3px; color: #8c9668; }
+  </style>
+</helmet>
+
+<div style="width: 1280px; height: 210px; position: relative; background: linear-gradient(180deg, #5e6b41 0%, #47542f 40%, #0d1108 96%);">
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; padding: 0 14px 10px;
+              background: linear-gradient(180deg, rgba(20,25,15,.55) 0%, rgba(14,18,10,.94) 38%, rgba(10,13,7,.98) 100%);
+              border-top: 2px solid rgba(201,168,106,.35); box-shadow: 0 -6px 26px rgba(0,0,0,.55);">
+
+    <!-- stencilled group rail: labels sit ON the rule, ammo-crate style -->
+    <div style="display: flex; align-items: center; gap: 10px; height: 22px; padding-top: 4px;">
+      <span class="grp">BASIC INFANTRY</span>
+      <span style="flex-grow: 1; height: 1px; background: rgba(201,168,106,.22);"></span>
+      <span class="grp">HEAVY WEAPONS</span>
+      <span style="flex-grow: 1; height: 1px; background: rgba(201,168,106,.22);"></span>
+      <span class="grp">SPECIALISTS</span>
+      <span style="flex-grow: 1; height: 1px; background: rgba(201,168,106,.22);"></span>
+      <span class="grp" style="color: #c9a86a;">CALL-INS</span>
+    </div>
+
+    <div style="display: flex; align-items: flex-end; gap: 10px; padding-top: 6px;">
+
+      <!-- command points: the one brass-plated element on the bar -->
+      <div style="width: 74px; height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+                  background: linear-gradient(180deg, #2a3119, #1a2010); border: 1px solid rgba(201,168,106,.5);
+                  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);">
+        <span class="stencil" style="font-size: 30px; color: #c9a86a; line-height: 1;">14</span>
+        <span style="font-size: 9px; letter-spacing: 3px; color: #8c9668;">CP</span>
+        <span style="width: 34px; height: 1px; background: rgba(201,168,106,.35); display: block; margin-top: 3px;"></span>
+        <span style="font-size: 8px; letter-spacing: 1px; color: #6e7a52;">+2 / 5s</span>
+      </div>
+
+      <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+        <div style="display: flex; align-items: flex-end; gap: 6px;">
+          <sc-for list="{{g.cards}}" as="c" hint-placeholder-count="3">
+            <div class="card">
+              <span style="position: absolute; top: 2px; left: 4px; font-size: 8px; color: #8c9668;">{{c.key}}</span>
+              <span style="position: absolute; top: 2px; right: 4px; font-size: 8px; color: #8c9668;">{{c.men}}</span>
+              <span class="well" style="margin-top: 11px;"></span>
+              <span class="card-name">{{c.name}}</span>
+              <div style="display: flex; gap: 2px; margin-top: 2px;">
+                <sc-for list="{{c.pips}}" as="p" hint-placeholder-count="9">
+                  <span class="pip" style="{{p.style}}"></span>
+                </sc-for>
+              </div>
+              <span class="card-cost" style="margin-top: 1px;">{{c.cost}}</span>
+            </div>
+          </sc-for>
+        </div>
+        <span style="width: 1px; height: 66px; background: rgba(201,168,106,.18); display: block;"></span>
+      </sc-for>
+
+      <!-- call-ins: same plate, brass edge to separate them -->
+      <div style="display: flex; align-items: flex-end; gap: 6px;">
+        <div class="card" style="border-color: rgba(201,168,106,.6);">
+          <span style="position: absolute; top: 2px; left: 4px; font-size: 8px; color: #c9a86a;">7</span>
+          <span class="well" style="margin-top: 11px;"></span>
+          <span class="card-name">ARTILLERY</span>
+          <div style="display: flex; gap: 2px; margin-top: 2px;">
+            <span class="pip" style="background: #d8a24e;"></span>
+            <span class="pip" style="background: #d8a24e;"></span>
+            <span class="pip" style="background: #d8a24e;"></span>
+            <span class="pip" style="background: #d8a24e;"></span>
+          </div>
+          <span class="card-cost" style="margin-top: 1px;">9</span>
+        </div>
+        <div class="card" style="border-color: rgba(201,168,106,.6); opacity: .55;">
+          <span style="position: absolute; top: 2px; left: 4px; font-size: 8px; color: #c9a86a;">8</span>
+          <span class="well" style="margin-top: 11px;"></span>
+          <span class="card-name">AIR STRIKE</span>
+          <span style="position: absolute; left: 0; right: 0; bottom: 20px; text-align: center; font-size: 13px; color: #d8d2b0;">18s</span>
+          <span class="card-cost" style="margin-top: 15px; color: #d24a2e;">12</span>
+        </div>
+      </div>
+
+      <span style="flex-grow: 1;"></span>
+
+      <!-- controls: stencil buttons, chamfered like the CP plate -->
+      <div style="display: flex; gap: 5px; align-self: center;">
+        <sc-for list="{{controls}}" as="b" hint-placeholder-count="4">
+          <span style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+                       background: linear-gradient(180deg, #2a3119, #1a2010); border: 1px solid rgba(201,168,106,.34);
+                       color: #d8d2b0; font-size: 11px; letter-spacing: 1px;
+                       clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);">{{b}}</span>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() {
+    const on = 'background: #d8a24e;', tough = 'background: #8fae63;';
+    // fire rate and toughness read per unit — identical pips on every card would
+    // be decoration pretending to be data
+    const pips = (fire, hp) =>
+      Array.from({ length: 4 }, (_, i) => ({ style: i < fire ? on : '' }))
+        .concat([{ style: 'width: 3px; background: transparent;' }],
+                Array.from({ length: 4 }, (_, i) => ({ style: i < hp ? tough : '' })));
+    return {
+      controls: ['II', '1x', 'SND', 'FS'],
+      groups: [
+        { cards: [ { key: '1', men: '5', name: 'RIFLEMAN', cost: '3', pips: pips(3, 3) },
+                   { key: '2', men: '5', name: 'ARVN', cost: '2', pips: pips(2, 2) },
+                   { key: '3', men: '4', name: 'RECON', cost: '4', pips: pips(2, 2) } ] },
+        { cards: [ { key: '4', men: '3', name: 'M60', cost: '5', pips: pips(4, 2) },
+                   { key: '5', men: '2', name: 'RPG', cost: '5', pips: pips(2, 2) } ] },
+        { cards: [ { key: '6', men: '2', name: 'SNIPER', cost: '6', pips: pips(1, 1) },
+                   { key: '7', men: '3', name: 'ENGINEER', cost: '4', pips: pips(2, 3) } ] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

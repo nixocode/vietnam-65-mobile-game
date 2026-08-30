@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "vietnam65-mobile",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["tools/devserver.py", "8932"],
+      "port": 8932
+    }
+  ]
+}

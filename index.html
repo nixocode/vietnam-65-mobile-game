@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- user-scalable=no: pinch-zoom fights a canvas game that does its own panning,
+     and a stray double-tap zoom leaves the player stuck at 2x with no way back.
+     viewport-fit=cover lets the stage reach under the notch once fullscreen. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0c0e09">
+<title>VIETNAM '65 — LANES OF WAR</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="game-canvas" width="1280" height="720"></canvas>
+
+    <!-- In-match HUD -->
+    <div id="hud" class="hidden">
+      <div id="hud-top">
+        <div class="morale-block" id="morale-us">
+          <div class="morale-label"><span class="emblem us">★</span> US / ARVN</div>
+          <div class="morale-bar"><div class="morale-fill us" id="morale-fill-us"></div></div>
+        </div>
+        <div id="hud-center">
+          <div id="flag-pips"></div>
+          <div id="objective-line"></div>
+          <canvas id="minimap" width="240" height="52" title="Battlefield map — click to move the camera"></canvas>
+        </div>
+        <div class="morale-block right" id="morale-vc">
+          <div class="morale-label">VC / NVA <span class="emblem vc">★</span></div>
+          <div class="morale-bar"><div class="morale-fill vc" id="morale-fill-vc"></div></div>
+        </div>
+      </div>
+
+      <div id="hud-controls">
+        <button id="btn-pause" title="Pause [P]">II</button>
+        <button id="btn-speed" title="Speed [F]">1×</button>
+        <button id="btn-mute" title="Mute [M]">SND</button>
+        <button id="btn-fullscreen" title="Fullscreen">⤢</button>
+      </div>
+
+      <!-- Hover detail for a unit card. Sits in the HUD layer so it scales with
+           --uiK like everything else. -->
+      <div id="unit-info" class="hidden"></div>
+
+      <div id="banner"></div>
+      <div id="ticker"></div>
+
+      <div id="hud-bottom">
+        <div id="cp-display"><span id="cp-value">0</span><span class="cp-label">CP</span></div>
+        <div id="unit-cards"></div>
+        <div id="callin-divider"></div>
+        <div id="callin-cards"></div>
+      </div>
+      <div id="target-hint" class="hidden"></div>
+      <div id="squad-panel" class="hidden"></div>
+    </div>
+
+    <!-- Main menu -->
+    <div class="screen" id="screen-menu">
+      <div class="menu-inner">
+        <div class="title-block">
+          <div class="title-over">— 1965 · REPUBLIC OF VIETNAM —</div>
+          <h1>VIETNAM '65</h1>
+          <div class="title-sub">LANES OF WAR</div>
+          <div id="load-status"></div>
+        </div>
+        <div class="menu-buttons">
+          <button class="big-btn" id="btn-campaign">CAMPAIGN</button>
+          <button class="big-btn" id="btn-skirmish">SKIRMISH</button>
+          <button class="big-btn" id="btn-help">FIELD MANUAL</button>
+        </div>
+        <div class="menu-footer">A lane-tactics game in the tradition of <em>Warfare 1944</em>.<br>
+        Depicting the war of 1965–69 with documentary intent — no side is glorified here.</div>
+      </div>
+    </div>
+
+    <!-- Skirmish setup -->
+    <div class="screen hidden" id="screen-skirmish">
+      <div class="panel wide">
+        <h2>SKIRMISH — OPERATION ORDER</h2>
+        <div class="setup-row">
+          <div class="setup-label">COMMAND<br><span id="perk-points">0 CMD</span></div>
+          <div class="perk-pick" id="perk-pick"></div>
+        </div>
+        <div class="setup-row">
+          <div class="setup-label">FACTION</div>
+          <div class="faction-pick">
+            <button class="faction-card selected" data-side="us" id="pick-us">
+              <div class="fc-emblem us">★</div>
+              <div class="fc-name">US / ARVN</div>
+              <div class="fc-doc">FIREPOWER DOCTRINE</div>
+              <div class="fc-desc">Artillery, napalm, air cavalry. Costly, casualty-sensitive troops. You must find the enemy before you can destroy him.</div>
+            </button>
+            <button class="faction-card" data-side="vc" id="pick-vc">
+              <div class="fc-emblem vc">★</div>
+              <div class="fc-name">VC / NVA</div>
+              <div class="fc-doc">GROUND DOCTRINE</div>
+              <div class="fc-desc">Concealment, punji traps, spider holes, tunnels. No air, no artillery — the land itself is your weapon.</div>
+            </button>
+          </div>
+        </div>
+        <div class="setup-row">
+          <div class="setup-label">AREA OF OPERATIONS</div>
+          <div id="map-pick" class="map-pick"></div>
+        </div>
+        <div class="setup-row">
+          <div class="setup-label">OPPOSITION</div>
+          <div class="diff-pick">
+            <button class="diff-btn" data-diff="recruit">RECRUIT</button>
+            <button class="diff-btn selected" data-diff="veteran">VETERAN</button>
+            <button class="diff-btn" data-diff="elite">ELITE</button>
+          </div>
+        </div>
+        <div class="setup-actions">
+          <button class="big-btn ghost" id="btn-skirmish-back">BACK</button>
+          <button class="big-btn" id="btn-skirmish-start">COMMENCE OPERATION</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Campaign select -->
+    <div class="screen hidden" id="screen-campaign">
+      <div class="panel wide">
+        <h2>CAMPAIGN — 1965 to 1969</h2>
+        <div class="campaign-note">Five operations, alternating sides. Learn both doctrines: the war looked very different depending on which end of the lane you stood on.</div>
+        <div id="mission-list"></div>
+        <div class="setup-actions">
+          <button class="big-btn ghost" id="btn-campaign-back">BACK</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Briefing -->
+    <div class="screen hidden" id="screen-briefing">
+      <div class="panel briefing">
+        <div class="brief-stamp" id="brief-stamp">OPERATION ORDER</div>
+        <h2 id="brief-title"></h2>
+        <div class="brief-meta" id="brief-meta"></div>
+        <div class="brief-body" id="brief-body"></div>
+        <div class="brief-objectives" id="brief-objectives"></div>
+        <div class="setup-actions">
+          <button class="big-btn ghost" id="btn-brief-back">WITHDRAW</button>
+          <button class="big-btn" id="btn-brief-start">COMMENCE OPERATION</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Field manual -->
+    <div class="screen hidden" id="screen-help">
+      <div class="panel wide manual">
+        <h2>FIELD MANUAL</h2>
+        <div class="manual-cols">
+          <div class="manual-col">
+            <h3>THE LANE WAR</h3>
+            <ul>
+              <li><b>Command Points (CP)</b> accrue over time. Spend them on troops and support. Holding lane flags raises income and drains enemy morale.</li>
+              <li>Click a <b>unit card</b> (or keys 1–6), then click a lane to deploy. Units advance and engage on their own.</li>
+              <li>Win by breaking enemy <b>morale</b>. Every soldier lost costs morale — US morale bleeds faster per casualty than VC morale.</li>
+              <li><b>Elevation matters.</b> Troops firing downhill gain range and damage. Study the terrain line of each lane.</li>
+              <li><b>Cover is not concealment.</b> Concealed VC troops in brush cannot be targeted until spotted — and their first volley from hiding hits harder.</li>
+            </ul>
+            <h3>SNIPERS</h3>
+            <ul>
+              <li>Snipers take time to aim — watch for the <b>scope glint</b>. One shot, one kill.</li>
+              <li>Two snipers aiming at each other triggers a <b>duel</b>: high ground and range decide who fires first.</li>
+              <li>Counter a sniper with artillery, smoke of battle... or your own marksman.</li>
+            </ul>
+          </div>
+          <div class="manual-col">
+            <h3>US — FIREPOWER DOCTRINE <span class="emblem us">★</span></h3>
+            <ul>
+              <li><b>Fire Mission</b>: 105mm barrage on a marked point, after a delay.</li>
+              <li><b>Napalm</b>: burns a strip of ground — and the brush concealing the enemy. Fire does not check dog tags; keep your own men clear.</li>
+              <li><b>Dustoff</b>: medevac flight restores morale.</li>
+              <li><b>Air Cav</b>: Huey inserts a squad anywhere on a lane.</li>
+              <li><b>Arc Light</b>: B-52 strike. Devastating against massed troops, wasted on dispersed ones.</li>
+              <li><b>Engineers</b> clear traps and tunnels; <b>LRRP recon</b> spots concealed enemies at long range.</li>
+            </ul>
+            <h3>VC — GROUND DOCTRINE <span class="emblem vc">★</span></h3>
+            <ul>
+              <li><b>Punji pits & mines</b>: hidden traps placed on the lane. Engineers can find and clear them.</li>
+              <li><b>Spider hole</b>: a buried marksman who fires one ambush shot, then vanishes again.</li>
+              <li><b>Tunnel</b>: dig a forward exit — your infantry emerge there instead of walking the whole lane.</li>
+              <li>Guerrillas in brush are <b>concealed</b>: untargetable until spotted, with an ambush bonus on their first strike.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="setup-actions">
+          <button class="big-btn" id="btn-help-back">RETURN</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pause -->
+    <div class="screen hidden translucent" id="screen-pause">
+      <div class="panel narrow">
+        <h2>OPERATION SUSPENDED</h2>
+        <div class="pause-buttons">
+          <button class="big-btn" id="btn-resume">RESUME</button>
+          <button class="big-btn ghost" id="btn-restart">RESTART OPERATION</button>
+          <button class="big-btn ghost" id="btn-abort">ABORT TO COMMAND</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div class="screen hidden" id="screen-result">
+      <div class="panel narrow result">
+        <h2 id="result-title">VICTORY</h2>
+        <div id="result-sub"></div>
+        <div id="result-stats"></div>
+        <div class="setup-actions column">
+          <button class="big-btn hidden" id="btn-next-mission">NEXT OPERATION</button>
+          <button class="big-btn ghost" id="btn-result-replay">REPLAY</button>
+          <button class="big-btn ghost" id="btn-result-menu">RETURN TO COMMAND</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Shown only when a touch device is held upright. A 16:9 stage in portrait
+     collapses to about a quarter of the screen, so asking for a rotation beats
+     shipping an unplayable letterbox. -->
+<!-- MOBILE: a landscape GATE, not a nag.
+     The desktop build showed this as an overlay you could tap past, because a
+     wrong orientation guess must never lock a player out. Here it is the front
+     door: the battlefield is 2560px wide and the game is played along that
+     axis, so portrait is not a degraded view, it is a broken one. The tap also
+     does the work iOS only allows from a real gesture — fullscreen and the
+     orientation lock. -->
+<div id="rotate-prompt">
+  <div class="rotate-icon">⟳</div>
+  <div class="rotate-title">ROTATE TO PLAY</div>
+  <div class="rotate-sub">Vietnam '65 is fought in landscape</div>
+  <div class="rotate-skip">tap anywhere — this also goes fullscreen</div>
+</div>
+
+<script src="assets/manifest.js"></script>
+<script src="js/data.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/render.js"></script>
+<script src="js/sprite3d.js"></script>
+<script src="js/props.js"></script>
+<script src="js/perks.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/mobile.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

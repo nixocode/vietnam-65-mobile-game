@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #0d1108; font-family: 'Courier New', Courier, monospace; }
+    a { color: #c9a86a; } a:hover { color: #e0c48c; }
+    .stencil { font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif; }
+  </style>
+</helmet>
+
+<div style="width: 1280px; height: 150px; position: relative; background: linear-gradient(180deg, #e08a52 0%, #b8703f 62%, #6d7a4a 100%);">
+
+  <!-- the command plate: one chamfered field-manual strip across the top -->
+  <div style="position: absolute; inset: 0 0 auto 0; height: 116px; display: flex; align-items: stretch; gap: 0;
+              background: linear-gradient(180deg, rgba(20,25,15,.93) 0%, rgba(14,18,10,.86) 58%, rgba(14,18,10,0) 100%);
+              border-bottom: 1px solid rgba(201,168,106,.28);">
+
+    <!-- US morale -->
+    <div style="width: 344px; padding: 12px 16px 0 18px; display: flex; flex-direction: column; gap: 6px;">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <span class="stencil" style="font-size: 15px; letter-spacing: 3px; color: #e6dfbe;">US / ARVN</span>
+        <span style="flex-grow: 1;"></span>
+        <span style="font-size: 11px; letter-spacing: 1px; color: #8aa06b;">MORALE 83%</span>
+      </div>
+      <div style="height: 13px; background: rgba(0,0,0,.55); border: 1px solid rgba(201,168,106,.4);
+                  box-shadow: inset 0 1px 4px rgba(0,0,0,.6); position: relative;">
+        <div style="position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 24px, rgba(0,0,0,.45) 24px 25px);"></div>
+        <div style="height: 100%; width: 83%; background: linear-gradient(180deg, #b9cf8f, #7d9455);"></div>
+      </div>
+      <div style="display: flex; gap: 4px; margin-top: 2px;">
+        <span style="font-size: 10px; letter-spacing: 2px; color: #7d8a63;">SQUADS 6 / 8</span>
+      </div>
+    </div>
+
+    <!-- centre: objective, pips, minimap -->
+    <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; padding-top: 9px;">
+      <div class="stencil" style="font-size: 12px; letter-spacing: 5px; color: #c9a86a;">MEKONG DELTA &#183; APRIL 1968</div>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <span style="width: 15px; height: 15px; border: 1px solid rgba(216,210,176,.5); background: #7d9455; transform: rotate(45deg); display: block;"></span>
+        <span style="width: 15px; height: 15px; border: 1px solid rgba(216,210,176,.5); background: rgba(0,0,0,.5); transform: rotate(45deg); display: block;"></span>
+        <span style="width: 15px; height: 15px; border: 1px solid rgba(216,210,176,.5); background: #b3452f; transform: rotate(45deg); display: block;"></span>
+      </div>
+      <!-- minimap: two lanes, chamfered well -->
+      <div style="width: 268px; height: 54px; background: rgba(6,9,4,.86); border: 1px solid rgba(201,168,106,.45);
+                  box-shadow: inset 0 2px 8px rgba(0,0,0,.75); padding: 5px 6px; display: flex; flex-direction: column; gap: 5px;
+                  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);">
+        <div style="height: 18px; background: rgba(60,69,49,.5); border-left: 2px solid #7d9455; border-right: 2px solid #b3452f; position: relative;">
+          <span style="position: absolute; left: 22%; top: 4px; width: 5px; height: 10px; background: #b9cf8f; display: block;"></span>
+          <span style="position: absolute; left: 31%; top: 4px; width: 5px; height: 10px; background: #b9cf8f; display: block;"></span>
+          <span style="position: absolute; left: 68%; top: 4px; width: 5px; height: 10px; background: #e8917a; display: block;"></span>
+          <span style="position: absolute; left: 50%; top: -1px; width: 1px; height: 20px; background: rgba(201,168,106,.7); display: block;"></span>
+        </div>
+        <div style="height: 18px; background: rgba(60,69,49,.5); border-left: 2px solid #7d9455; border-right: 2px solid #b3452f; position: relative;">
+          <span style="position: absolute; left: 40%; top: 4px; width: 5px; height: 10px; background: #b9cf8f; display: block;"></span>
+          <span style="position: absolute; left: 57%; top: 4px; width: 5px; height: 10px; background: #e8917a; display: block;"></span>
+          <span style="position: absolute; left: 64%; top: 4px; width: 5px; height: 10px; background: #e8917a; display: block;"></span>
+          <span style="position: absolute; left: 50%; top: -1px; width: 1px; height: 20px; background: rgba(201,168,106,.7); display: block;"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- VC morale -->
+    <div style="width: 344px; padding: 12px 18px 0 16px; display: flex; flex-direction: column; gap: 6px; text-align: right;">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <span style="font-size: 11px; letter-spacing: 1px; color: #c25b45;">MORALE 91%</span>
+        <span style="flex-grow: 1;"></span>
+        <span class="stencil" style="font-size: 15px; letter-spacing: 3px; color: #e6dfbe;">VC / NVA</span>
+      </div>
+      <div style="height: 13px; background: rgba(0,0,0,.55); border: 1px solid rgba(201,168,106,.4);
+                  box-shadow: inset 0 1px 4px rgba(0,0,0,.6); position: relative; display: flex; justify-content: flex-end;">
+        <div style="position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 24px, rgba(0,0,0,.45) 24px 25px);"></div>
+        <div style="height: 100%; width: 91%; background: linear-gradient(180deg, #e8917a, #b3452f);"></div>
+      </div>
+      <div style="font-size: 10px; letter-spacing: 2px; color: #7d8a63;">SQUADS 7 / 8</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

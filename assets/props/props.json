@@ -1,0 +1,304 @@
+{
+ "props": [
+  {
+   "name": "bamboo_a",
+   "hM": 4.878,
+   "wM": 2.717,
+   "groundY": 240.3,
+   "ppm": 46.04,
+   "res": 256,
+   "realH": 4.8,
+   "aspect": 0.557
+  },
+  {
+   "name": "banana_a",
+   "hM": 2.62,
+   "wM": 2.42,
+   "groundY": 240.3,
+   "ppm": 85.71,
+   "res": 256,
+   "realH": 2.7,
+   "aspect": 0.9237
+  },
+  {
+   "name": "bush_low",
+   "hM": 0.727,
+   "wM": 1.768,
+   "groundY": 174.2,
+   "ppm": 126.99,
+   "res": 256,
+   "realH": 0.85,
+   "aspect": 2.4319
+  },
+  {
+   "name": "canopy_a",
+   "hM": 6.567,
+   "wM": 6.209,
+   "groundY": 240.3,
+   "ppm": 34.19,
+   "res": 256,
+   "realH": 8.5,
+   "aspect": 0.9455
+  },
+  {
+   "name": "cart_v",
+   "hM": 0.734,
+   "wM": 1.842,
+   "groundY": 172.7,
+   "ppm": 121.88,
+   "res": 256,
+   "realH": 1.4,
+   "aspect": 2.5095
+  },
+  {
+   "name": "deadtree_a",
+   "hM": 4.652,
+   "wM": 2.56,
+   "groundY": 240.3,
+   "ppm": 48.27,
+   "res": 256,
+   "realH": 4.5,
+   "aspect": 0.5503
+  },
+  {
+   "name": "dike_a",
+   "hM": 1.005,
+   "wM": 3.168,
+   "groundY": 163.6,
+   "ppm": 70.88,
+   "res": 256,
+   "realH": 0.62,
+   "aspect": 3.1522
+  },
+  {
+   "name": "fern_a",
+   "hM": 0.699,
+   "wM": 1.168,
+   "groundY": 195.1,
+   "ppm": 192.18,
+   "res": 256,
+   "realH": 0.75,
+   "aspect": 1.671
+  },
+  {
+   "name": "grass_a",
+   "hM": 1.999,
+   "wM": 2.656,
+   "groundY": 212.5,
+   "ppm": 84.53,
+   "res": 256,
+   "realH": 1.8,
+   "aspect": 1.3287
+  },
+  {
+   "name": "huey",
+   "hM": 3.3,
+   "wM": 6.81,
+   "groundY": 182.4,
+   "ppm": 32.98,
+   "res": 256,
+   "realH": 4.4,
+   "aspect": 2.0636
+  },
+  {
+   "name": "hut_a",
+   "hM": 0.768,
+   "wM": 1.464,
+   "groundY": 186.9,
+   "ppm": 153.4,
+   "res": 256,
+   "realH": 3.0,
+   "aspect": 1.9062
+  },
+  {
+   "name": "hut_b",
+   "hM": 0.761,
+   "wM": 1.411,
+   "groundY": 188.6,
+   "ppm": 159.2,
+   "res": 256,
+   "realH": 3.1,
+   "aspect": 1.8541
+  },
+  {
+   "name": "hut_c",
+   "hM": 0.574,
+   "wM": 1.321,
+   "groundY": 176.8,
+   "ppm": 169.95,
+   "res": 256,
+   "realH": 2.9,
+   "aspect": 2.3014
+  },
+  {
+   "name": "m113",
+   "hM": 2.18,
+   "wM": 4.9,
+   "groundY": 178.0,
+   "ppm": 45.83,
+   "res": 256,
+   "realH": 2.6,
+   "aspect": 2.2477
+  },
+  {
+   "name": "palm_a",
+   "hM": 2.909,
+   "wM": 2.321,
+   "groundY": 240.3,
+   "ppm": 77.19,
+   "res": 256,
+   "realH": 4.0,
+   "aspect": 0.7979
+  },
+  {
+   "name": "palm_b",
+   "hM": 3.587,
+   "wM": 2.61,
+   "groundY": 240.3,
+   "ppm": 62.6,
+   "res": 256,
+   "realH": 4.4,
+   "aspect": 0.7276
+  },
+  {
+   "name": "palm_c",
+   "hM": 2.689,
+   "wM": 2.863,
+   "groundY": 233.5,
+   "ppm": 78.44,
+   "res": 256,
+   "realH": 3.7,
+   "aspect": 1.0647
+  },
+  {
+   "name": "palm_d",
+   "hM": 2.685,
+   "wM": 2.636,
+   "groundY": 240.3,
+   "ppm": 83.63,
+   "res": 256,
+   "realH": 3.9,
+   "aspect": 0.9818
+  },
+  {
+   "name": "sandbag_wall",
+   "hM": 1.194,
+   "wM": 3.162,
+   "groundY": 170.4,
+   "ppm": 71.02,
+   "res": 256,
+   "realH": 1.3,
+   "aspect": 2.6482
+  },
+  {
+   "name": "sandbags_pile",
+   "hM": 0.932,
+   "wM": 2.315,
+   "groundY": 173.2,
+   "ppm": 96.98,
+   "res": 256,
+   "realH": 1.15,
+   "aspect": 2.4839
+  },
+  {
+   "name": "sandbags_row",
+   "hM": 0.107,
+   "wM": 0.27,
+   "groundY": 172.6,
+   "ppm": 832.52,
+   "res": 256,
+   "realH": 0.55,
+   "aspect": 2.5234
+  },
+  {
+   "name": "scrub_a",
+   "hM": 3.285,
+   "wM": 3.386,
+   "groundY": 236.9,
+   "ppm": 66.31,
+   "res": 256,
+   "realH": 4.2,
+   "aspect": 1.0307
+  },
+  {
+   "name": "shrine_a",
+   "hM": 1.201,
+   "wM": 1.064,
+   "groundY": 240.3,
+   "ppm": 186.91,
+   "res": 256,
+   "realH": 1.5,
+   "aspect": 0.8859
+  },
+  {
+   "name": "stall_v",
+   "hM": 1.362,
+   "wM": 1.507,
+   "groundY": 229.5,
+   "ppm": 149.05,
+   "res": 256,
+   "realH": 2.1,
+   "aspect": 1.1065
+  },
+  {
+   "name": "stonewall_a",
+   "hM": 0.919,
+   "wM": 3.1,
+   "groundY": 161.3,
+   "ppm": 72.44,
+   "res": 256,
+   "realH": 1.05,
+   "aspect": 3.3732
+  },
+  {
+   "name": "tuft_a",
+   "hM": 0.561,
+   "wM": 0.832,
+   "groundY": 203.7,
+   "ppm": 269.94,
+   "res": 256,
+   "realH": 0.55,
+   "aspect": 1.4831
+  },
+  {
+   "name": "village_row",
+   "hM": 0.502,
+   "wM": 1.723,
+   "groundY": 160.7,
+   "ppm": 130.32,
+   "res": 256,
+   "realH": 3.2,
+   "aspect": 3.4323
+  },
+  {
+   "name": "vine_a",
+   "hM": 1.33,
+   "wM": 1.601,
+   "groundY": 221.3,
+   "ppm": 140.27,
+   "res": 256,
+   "realH": 1.3,
+   "aspect": 1.2038
+  },
+  {
+   "name": "watchtower",
+   "hM": 5.218,
+   "wM": 2.598,
+   "groundY": 240.3,
+   "ppm": 43.03,
+   "res": 256,
+   "realH": 5.2,
+   "aspect": 0.4979
+  },
+  {
+   "name": "well_v",
+   "hM": 1.377,
+   "wM": 1.133,
+   "groundY": 240.3,
+   "ppm": 163.07,
+   "res": 256,
+   "realH": 1.5,
+   "aspect": 0.8228
+  }
+ ]
+}

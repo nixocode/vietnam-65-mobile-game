@@ -1,0 +1,32 @@
+# Vercel does NOT read .gitignore for CLI deploys, so the exclusions are
+# repeated here. Keep this in sync with .gitignore — an omission publishes
+# private source material to a public URL.
+
+# ---- Private source material. Never publish. -------------------------------
+# Contains a saved ChatGPT conversation export and a desktop screenshot.
+assets/assets:vietnam/
+assets/v3_sources/
+
+# ---- Build artifacts. The game loads atlas.png/atlas.json only. -------------
+assets/sprites3d/*/*_[0-9][0-9].png
+assets/sprites3d/*/index.json
+assets/sprites3d/*/.outlined.json
+assets/props/.toned.json
+assets/debug/
+
+# ---- Not part of the served site -------------------------------------------
+# The Blender pipeline and dev server are repo documentation, not runtime. In
+# particular tools/devserver.py exposes a debug write endpoint that is safe on
+# localhost and has no business on a public host.
+tools/
+docs/
+*.md
+LICENSE
+
+# ---- Local noise -----------------------------------------------------------
+.DS_Store
+**/.DS_Store
+*.pyc
+__pycache__/
+node_modules/
+.git/

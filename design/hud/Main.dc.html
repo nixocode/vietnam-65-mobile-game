@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #0d1108; font-family: 'Courier New', Courier, monospace; }
+    a { color: #c9a86a; } a:hover { color: #e0c48c; }
+    .stencil { font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif; }
+    .card {
+      position: relative; width: 78px; height: 84px; flex-shrink: 0;
+      display: flex; flex-direction: column; align-items: center; padding-top: 3px;
+      background:
+        radial-gradient(circle at 6% 8%, rgba(201,168,106,.85) 0 5%, transparent 6%),
+        radial-gradient(circle at 94% 8%, rgba(201,168,106,.85) 0 5%, transparent 6%),
+        linear-gradient(180deg, #3c4a2b 0%, #2f3a22 60%, #26301b 100%);
+      border: 1px solid #55643a; border-radius: 3px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 2px 6px rgba(0,0,0,.45);
+    }
+    .cname { font-family: Impact, Haettenschweiler, sans-serif; font-size: 9.5px; letter-spacing: .5px; color: #e6dfbe; margin-top: 2px; white-space: nowrap; }
+    .ccost { font-size: 11px; color: #c9a86a; font-weight: bold; margin-top: 1px; }
+    .well { width: 52px; height: 34px; background: linear-gradient(180deg, #202a16, #161d0f); border: 1px solid rgba(201,168,106,.30); display: block; margin-top: 11px; }
+    .pip { width: 5px; height: 5px; display: block; background: rgba(216,210,176,.18); }
+    .grp { font-family: Impact, Haettenschweiler, sans-serif; font-size: 10px; letter-spacing: 3px; color: #8c9668; }
+    .ctl { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+           background: linear-gradient(180deg, #2a3119, #1a2010); border: 1px solid rgba(201,168,106,.34);
+           color: #d8d2b0; font-size: 11px; letter-spacing: 1px;
+           clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px); }
+  </style>
+</helmet>
+
+<div style="width: 1280px; height: 720px; position: relative; overflow: hidden; background: {{sky}};">
+
+  <!-- battlefield stand-in: tonal only, so the HUD is judged over real values -->
+  <div style="position: absolute; left: 0; right: 0; top: 300px; bottom: 0; background: {{ground}};"></div>
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 150px;
+              background: linear-gradient(180deg, transparent, rgba(8,11,5,.75));"></div>
+
+  <!-- ===== TOP PLATE ===== -->
+  <div style="position: absolute; inset: 0 0 auto 0; height: 116px; display: flex; align-items: stretch;
+              background: linear-gradient(180deg, rgba(20,25,15,.93) 0%, rgba(14,18,10,.86) 58%, rgba(14,18,10,0) 100%);
+              border-bottom: 1px solid rgba(201,168,106,.28);">
+    <div style="width: 344px; padding: 12px 16px 0 18px; display: flex; flex-direction: column; gap: 6px;">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <span class="stencil" style="font-size: 15px; letter-spacing: 3px; color: #e6dfbe;">US / ARVN</span>
+        <span style="flex-grow: 1;"></span>
+        <span style="font-size: 11px; letter-spacing: 1px; color: #8aa06b;">MORALE 83%</span>
+      </div>
+      <div style="height: 13px; background: rgba(0,0,0,.55); border: 1px solid rgba(201,168,106,.4); box-shadow: inset 0 1px 4px rgba(0,0,0,.6); position: relative;">
+        <div style="position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 24px, rgba(0,0,0,.45) 24px 25px);"></div>
+        <div style="height: 100%; width: 83%; background: linear-gradient(180deg, #b9cf8f, #7d9455);"></div>
+      </div>
+      <div style="font-size: 10px; letter-spacing: 2px; color: #7d8a63;">SQUADS 6 / 8</div>
+    </div>
+
+    <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; padding-top: 9px;">
+      <div class="stencil" style="font-size: 12px; letter-spacing: 5px; color: #c9a86a;">MEKONG DELTA &#183; APRIL 1968</div>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <span style="width: 15px; height: 15px; border: 1px solid rgba(216,210,176,.5); background: #7d9455; transform: rotate(45deg); display: block;"></span>
+        <span style="width: 15px; height: 15px; border: 1px solid rgba(216,210,176,.5); background: rgba(0,0,0,.5); transform: rotate(45deg); display: block;"></span>
+        <span style="width: 15px; height: 15px; border: 1px solid rgba(216,210,176,.5); background: #b3452f; transform: rotate(45deg); display: block;"></span>
+      </div>
+      <div style="width: 268px; height: 54px; background: rgba(6,9,4,.86); border: 1px solid rgba(201,168,106,.45);
+                  box-shadow: inset 0 2px 8px rgba(0,0,0,.75); padding: 5px 6px; display: flex; flex-direction: column; gap: 5px; box-sizing: border-box;
+                  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);">
+        <sc-for list="{{lanes}}" as="ln" hint-placeholder-count="2">
+          <div style="height: 18px; background: rgba(60,69,49,.5); border-left: 2px solid #7d9455; border-right: 2px solid #b3452f; position: relative;">
+            <sc-for list="{{ln.marks}}" as="m" hint-placeholder-count="3">
+              <span style="{{m.style}}"></span>
+            </sc-for>
+            <span style="position: absolute; left: 50%; top: -1px; width: 1px; height: 20px; background: rgba(201,168,106,.7); display: block;"></span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="width: 344px; padding: 12px 18px 0 16px; display: flex; flex-direction: column; gap: 6px; text-align: right;">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <span style="font-size: 11px; letter-spacing: 1px; color: #c25b45;">MORALE 91%</span>
+        <span style="flex-grow: 1;"></span>
+        <span class="stencil" style="font-size: 15px; letter-spacing: 3px; color: #e6dfbe;">VC / NVA</span>
+      </div>
+      <div style="height: 13px; background: rgba(0,0,0,.55); border: 1px solid rgba(201,168,106,.4); box-shadow: inset 0 1px 4px rgba(0,0,0,.6); position: relative; display: flex; justify-content: flex-end;">
+        <div style="position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 24px, rgba(0,0,0,.45) 24px 25px);"></div>
+        <div style="height: 100%; width: 91%; background: linear-gradient(180deg, #e8917a, #b3452f);"></div>
+      </div>
+      <div style="font-size: 10px; letter-spacing: 2px; color: #7d8a63;">SQUADS 7 / 8</div>
+    </div>
+  </div>
+
+  <!-- battlefield label, same family as the plates -->
+  <div style="position: absolute; left: 402px; top: 268px; display: flex; align-items: center; gap: 6px;
+              padding: 3px 8px; background: rgba(10,13,7,.82); border-left: 2px solid #d24a2e;">
+    <span class="stencil" style="font-size: 11px; letter-spacing: 3px; color: #e08767;">PINNED</span>
+  </div>
+
+  <!-- ===== BOTTOM PLATE ===== -->
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; padding: 0 14px 10px;
+              background: linear-gradient(180deg, rgba(20,25,15,.55) 0%, rgba(14,18,10,.94) 38%, rgba(10,13,7,.98) 100%);
+              border-top: 2px solid rgba(201,168,106,.35); box-shadow: 0 -6px 26px rgba(0,0,0,.55);">
+    <div style="display: flex; align-items: center; gap: 10px; height: 22px; padding-top: 4px;">
+      <span class="grp">BASIC INFANTRY</span>
+      <span style="flex-grow: 1; height: 1px; background: rgba(201,168,106,.22);"></span>
+      <span class="grp">HEAVY WEAPONS</span>
+      <span style="flex-grow: 1; height: 1px; background: rgba(201,168,106,.22);"></span>
+      <span class="grp">SPECIALISTS</span>
+      <span style="flex-grow: 1; height: 1px; background: rgba(201,168,106,.22);"></span>
+      <span class="grp" style="color: #c9a86a;">CALL-INS</span>
+    </div>
+
+    <div style="display: flex; align-items: flex-end; gap: 10px; padding-top: 6px;">
+      <div style="width: 74px; height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+                  background: linear-gradient(180deg, #2a3119, #1a2010); border: 1px solid rgba(201,168,106,.5); box-sizing: border-box;
+                  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);">
+        <span class="stencil" style="font-size: 30px; color: #c9a86a; line-height: 1;">14</span>
+        <span style="font-size: 9px; letter-spacing: 3px; color: #8c9668;">CP</span>
+        <span style="width: 34px; height: 1px; background: rgba(201,168,106,.35); display: block; margin-top: 3px;"></span>
+        <span style="font-size: 8px; letter-spacing: 1px; color: #6e7a52;">+2 / 5s</span>
+      </div>
+
+      <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+        <div style="display: flex; align-items: flex-end; gap: 6px;">
+          <sc-for list="{{g.cards}}" as="c" hint-placeholder-count="3">
+            <div class="card">
+              <span style="position: absolute; top: 2px; left: 4px; font-size: 8px; color: #8c9668;">{{c.key}}</span>
+              <span style="position: absolute; top: 2px; right: 4px; font-size: 8px; color: #8c9668;">{{c.men}}</span>
+              <span class="well"></span>
+              <span class="cname">{{c.name}}</span>
+              <div style="display: flex; gap: 2px; margin-top: 2px;">
+                <sc-for list="{{c.pips}}" as="p" hint-placeholder-count="8">
+                  <span class="pip" style="{{p.style}}"></span>
+                </sc-for>
+              </div>
+              <span class="ccost">{{c.cost}}</span>
+            </div>
+          </sc-for>
+        </div>
+        <span style="width: 1px; height: 66px; background: rgba(201,168,106,.18); display: block;"></span>
+      </sc-for>
+
+      <div style="display: flex; align-items: flex-end; gap: 6px;">
+        <div class="card" style="border-color: rgba(201,168,106,.6);">
+          <span style="position: absolute; top: 2px; left: 4px; font-size: 8px; color: #c9a86a;">7</span>
+          <span class="well"></span>
+          <span class="cname">ARTILLERY</span>
+          <div style="display: flex; gap: 2px; margin-top: 2px;">
+            <span class="pip" style="background: #d8a24e;"></span>
+            <span class="pip" style="background: #d8a24e;"></span>
+            <span class="pip" style="background: #d8a24e;"></span>
+            <span class="pip" style="background: #d8a24e;"></span>
+          </div>
+          <span class="ccost">9</span>
+        </div>
+      </div>
+
+      <span style="flex-grow: 1;"></span>
+
+      <div style="display: flex; gap: 5px; align-self: center;">
+        <sc-for list="{{controls}}" as="b" hint-placeholder-count="4">
+          <span class="ctl">{{b}}</span>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"night":{"editor":"boolean","default":false,"section":"Scene"}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const night = this.props.night ?? false;
+    const on = 'background: #d8a24e;', tough = 'background: #8fae63;';
+    const pips = (fire, hp) => {
+      const a = Array.from({ length: 4 }, (_, i) => ({ style: i < fire ? on : '' }));
+      const b = Array.from({ length: 4 }, (_, i) => ({ style: i < hp ? tough : '' }));
+      return a.concat([{ style: 'width: 3px; height: 5px; background: transparent;' }], b);
+    };
+    const mark = (left, colour) =>
+      ({ style: 'position: absolute; left: ' + left + '%; top: 4px; width: 5px; height: 10px; background: ' + colour + '; display: block;' });
+    return {
+      sky: night
+        ? 'linear-gradient(180deg, #12203c 0%, #1b2b44 46%, #24313a 100%)'
+        : 'linear-gradient(180deg, #e59a5e 0%, #d3813f 40%, #b06d3e 100%)',
+      ground: night
+        ? 'linear-gradient(180deg, #2b3a2c 0%, #1d2a1f 100%)'
+        : 'linear-gradient(180deg, #6d7a4a 0%, #56643a 100%)',
+      controls: ['II', '1x', 'SND', 'FS'],
+      lanes: [
+        { marks: [mark(22, '#b9cf8f'), mark(31, '#b9cf8f'), mark(68, '#e8917a')] },
+        { marks: [mark(40, '#b9cf8f'), mark(57, '#e8917a'), mark(64, '#e8917a')] }
+      ],
+      groups: [
+        { cards: [ { key: '1', men: '5', name: 'RIFLEMAN', cost: '3', pips: pips(3, 3) },
+                   { key: '2', men: '5', name: 'ARVN', cost: '2', pips: pips(2, 2) },
+                   { key: '3', men: '4', name: 'RECON', cost: '4', pips: pips(2, 2) } ] },
+        { cards: [ { key: '4', men: '3', name: 'M60', cost: '5', pips: pips(4, 2) },
+                   { key: '5', men: '2', name: 'RPG', cost: '5', pips: pips(2, 2) } ] },
+        { cards: [ { key: '6', men: '2', name: 'SNIPER', cost: '6', pips: pips(1, 1) },
+                   { key: '7', men: '3', name: 'ENGINEER', cost: '4', pips: pips(2, 3) } ] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

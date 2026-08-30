@@ -1,0 +1,26 @@
+WEAPON SAMPLES — provenance and licence
+=======================================
+
+Source   The Free Firearm Sound Library
+Authors  Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney
+Licence  CC0 1.0 — "Our team holds CC0 NO RIGHTS RESERVED for this library.
+         It may be used without royalty or credit."
+Via      https://opengameart.org/content/the-free-firearm-sound-library
+
+Kickstarter-funded in 2013 for the express purpose of letting game projects use
+real firearm recordings without licensing. CC0 requires no attribution; this
+file exists anyway, because an asset whose origin is not written down is an
+asset nobody can safely reuse later.
+
+The originals are 96 kHz 24-bit stereo, several MB per take. tools/make_gun_
+samples.py finds the shot in each, trims 0.42 s around it, folds to mono,
+decimates 4:1 to 24 kHz and writes 16-bit PCM — about 20 KB each.
+
+  m16.wav   AR-15, .223 / 5.56x45, single shot, near      (D_32P)
+  ak.wav    AK-47, 7.62x39, single shot, near             (C_28P)
+  mg.wav    PPSh, 7.62x25, single shot, near              (P_30P)
+  bolt.wav  Mosin Nagant, 7.62x54R, single shot, near     (M_21P)
+
+The AR-15 stands in for the M16 — same cartridge family and barrel length, and
+it is what the library has. The PPSh stands in for the M60 and RPD: not a belt
+gun, but the closest heavy 7.62 report in a CC0 set.

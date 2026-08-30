@@ -1,0 +1,12 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1280, "h": 720, "title": "In-match HUD" },
+    { "file": "TopBar.dc.html", "x": 0, "y": 800, "w": 1280, "h": 150, "title": "Command plate" },
+    { "file": "CardBar.dc.html", "x": 0, "y": 1010, "w": 1280, "h": 210, "title": "Card bar" },
+    { "file": "UnitInfo.dc.html", "x": 1360, "y": 800, "w": 380, "h": 470, "title": "Unit info panel" }
+  ],
+  "annotations": [
+    { "id": "brief", "x": 1360, "y": 0, "w": 300, "text": "Field-manual plates, not glossy panels.\n\nCarried over from the shipped CSS: 78x84 cards with brass corner rivets, 13px morale bars, Impact stencil + Courier data, the --brass/--paper/--olive tokens.\n\nNew here: chamfered plate corners instead of rounded, group labels sitting on a hairline rule (ammo-crate stencil), a brass CP plate as the one emphasised control, and corner-tick portrait wells." }
+  ],
+  "launch": { "view": "canvas" }
+}

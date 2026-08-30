@@ -1,0 +1,1073 @@
+:root {
+  --ink: #14170f;
+  --olive: #3c4531;
+  --olive-dark: #262c1e;
+  --paper: #d8d2b0;
+  --paper-dim: #b3ad8d;
+  --brass: #c9a86a;
+  /* Components, so alpha variants of the accent can follow a side re-theme too —
+     rgba() cannot take a hex token apart. */
+  --brass-rgb: 201, 168, 106;
+  /* The HUD plate: the olive gradient every button and panel is stamped from,
+     and its hover. Tokenised for the same reason. */
+  --plate-hi: #2a3119;
+  --plate-lo: #1a2010;
+  --plate-hi-h: #333c1f;
+  --plate-lo-h: #1f2614;
+  --us: #8aa06b;
+  --us-bright: #b5c98f;
+  --vc: #c25b45;
+  --vc-bright: #e08767;
+  --danger: #d24a2e;
+  --font-head: 'Impact', 'Haettenschweiler', 'Arial Narrow Bold', sans-serif;
+  --font-mono: 'Courier New', Courier, monospace;
+}
+
+/* ---- THE VC / NVA HUD ------------------------------------------------------
+ *
+ * `body.side-vc` existed and carried exactly ONE rule — a call-in card
+ * background — so playing as the VC gave you the US Army's HUD: olive drab
+ * plates, brass fittings, the whole field-manual treatment of the side you are
+ * fighting. Reported from play, and correct.
+ *
+ * The two sides had genuinely different visual worlds and the HUD should say
+ * which one you are. US is a printed field manual: olive plate, brass rivets,
+ * khaki paper. The NLF's is austere by comparison and its one bright note is
+ * the gold star of the flag, so the VC plate goes to a near-black worn brown
+ * — black cotton and bamboo rather than sprayed steel — and the accent goes
+ * from a brownish brass to a clean bright gold.
+ *
+ * Done entirely by re-pointing the tokens, which is why the 42 hardcoded
+ * accent and plate colours were routed through them first: custom properties
+ * set on `body` cascade to the whole HUD, so this block is the entire theme.
+ * The US side is unchanged, verified by computed-style diff over 404 elements. */
+body.side-vc {
+  --brass: #d9b436;
+  --brass-rgb: 217, 180, 54;
+  --plate-hi: #2b1f1c;
+  --plate-lo: #170f0e;
+  --plate-hi-h: #3a2a24;
+  --plate-lo-h: #1d1412;
+  --paper: #d4cfc0;
+  --paper-dim: #a9a494;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+
+html, body {
+  width: 100%; height: 100%;
+  /* dvh tracks the mobile URL bar as it hides and shows; without it the stage
+     is sized against a viewport that is briefly wrong on every scroll gesture */
+  height: 100dvh;
+  background: #0c0e09;
+  overflow: hidden;
+  /* stop the page itself rubber-banding when a drag reaches the canvas edge */
+  overscroll-behavior: none;
+  font-family: var(--font-mono);
+  color: var(--paper);
+}
+
+#stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: min(100vw, calc(100vh * 16 / 9));
+  height: min(100vh, calc(100vw * 9 / 16));
+  background: #000;
+  box-shadow: 0 0 80px rgba(0,0,0,.8);
+}
+
+#game-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+  cursor: crosshair;
+  /* THE reason a drag could never pan the map: without this the browser claims
+     the gesture for document scrolling and pinch-zoom before touchmove is even
+     dispatched. `none` hands every touch to the game. */
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------------------------------------------------------------- mobile ---
+ * The stage is 16:9 and centred, which is right on a desktop and wrong on a
+ * phone: `min(100vw, 100vh*16/9)` on a 390x844 screen gives 390x219, so the
+ * game occupied about a quarter of the display. In landscape the same rule is
+ * correct, so the fix is to fill the short axis and let the notch be covered
+ * rather than to change the aspect.
+ */
+#app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+               env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+body.touch #stage { box-shadow: none; }
+
+/* Touch targets. 44px is the usual floor for a finger; the HUD buttons were
+   sized for a mouse pointer.
+ *
+ * These are expressed in DESIGN pixels, and the whole HUD is then scaled by
+ * --uiK (0.52 on a phone in landscape) — so a 44px design button lands at ~23
+ * real pixels, which is not a finger target at all. The order buttons measured
+ * exactly that. Sizes here are therefore divided back out by the scale, so the
+ * PHYSICAL target is right rather than the nominal one. */
+body.touch #hud-controls button {
+  min-width: calc(44px / var(--uiK, 1)); min-height: calc(40px / var(--uiK, 1));
+  font-size: calc(15px / var(--uiK, 1));
+}
+body.touch .card { min-height: calc(44px / var(--uiK, 1)); }
+
+/* Squad orders — the controls a player uses most, and the ones that were
+   smallest. Kept legible as well as tappable. */
+body.touch #squad-panel button {
+  min-height: calc(42px / var(--uiK, 1));
+  /* width matters as much as height: the smoke button is a single letter and
+     measured 25px across — tall enough to hit and too narrow to */
+  min-width: calc(42px / var(--uiK, 1));
+  padding: calc(6px / var(--uiK, 1)) calc(12px / var(--uiK, 1));
+  font-size: calc(12px / var(--uiK, 1));
+}
+body.touch #squad-panel .sp-name { font-size: calc(12px / var(--uiK, 1)); }
+/* the keyboard hints are noise on a device with no keyboard */
+body.touch #squad-panel button i { display: none; }
+
+#btn-fullscreen { font-size: 15px; line-height: 1; }
+
+/* Rotate prompt — only ever visible on a touch device held upright. */
+#rotate-prompt {
+  position: fixed; inset: 0; z-index: 9999;
+  display: none;
+  flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  background: #0c0e09;
+  color: var(--paper);
+  text-align: center;
+  padding: 24px;
+}
+body.portrait #rotate-prompt { display: flex; }
+.rotate-icon {
+  font-size: 54px; color: var(--brass, var(--brass));
+  animation: rotate-hint 2.4s ease-in-out infinite;
+}
+@keyframes rotate-hint {
+  0%, 55%, 100% { transform: rotate(0deg); }
+  25%, 45%      { transform: rotate(-90deg); }
+}
+.rotate-title { font-size: 17px; letter-spacing: 2px; }
+.rotate-sub { font-size: 12px; opacity: .65; letter-spacing: 1px; }
+.rotate-skip {
+  margin-top: 18px; font-size: 11px; letter-spacing: 1px;
+  opacity: .42; text-decoration: underline;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- Screens ---------- */
+.screen {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(70,80,50,.25), transparent 70%),
+    linear-gradient(rgba(10,12,7,.82), rgba(10,12,7,.92));
+  z-index: 20;
+}
+.panel.wide { width: 78%; }
+.panel.narrow { width: 460px; text-align: center; }
+.panel.briefing { width: 640px; }
+
+h1 {
+  font-family: var(--font-head);
+  font-size: 88px;
+  letter-spacing: 10px;
+  color: var(--paper);
+  text-shadow: 0 4px 0 rgba(0,0,0,.55), 0 0 34px rgba(220,160,80,.25);
+  line-height: 1;
+}
+h3 {
+  font-family: var(--font-head);
+  font-size: 17px;
+  letter-spacing: 3px;
+  color: var(--paper);
+  margin: 14px 0 7px;
+}
+
+.emblem { font-style: normal; }
+.emblem.us { color: var(--us-bright); }
+.emblem.vc { color: var(--vc-bright); }
+
+/* ---------- Main menu ---------- */
+.menu-inner { text-align: center; margin-top: -30px; }
+.title-over {
+  font-size: 13px; letter-spacing: 6px; color: var(--brass);
+  margin-bottom: 8px; text-shadow: 0 1px 0 #000;
+}
+.title-sub {
+  font-family: var(--font-head);
+  font-size: 26px; letter-spacing: 18px; text-indent: 18px;
+  color: var(--vc-bright);
+  margin-top: 2px;
+  text-shadow: 0 2px 0 rgba(0,0,0,.6);
+}
+#load-status {
+  margin-top: 10px; font-size: 10px; letter-spacing: 3px;
+  color: rgba(216,210,176,.55); text-shadow: 0 1px 0 #000;
+  min-height: 12px;
+}
+.menu-buttons { margin-top: 44px; display: flex; flex-direction: column; gap: 14px; align-items: center; }
+.menu-footer {
+  margin-top: 40px; font-size: 11px; line-height: 1.7;
+  color: rgba(216,210,176,.6); text-shadow: 0 1px 0 #000;
+}
+
+.big-btn {
+  font-family: var(--font-head);
+  font-size: 20px; letter-spacing: 4px;
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--paper), #b8b28f);
+  border: none;
+  border-bottom: 4px solid #7d7758;
+  padding: 12px 44px;
+  min-width: 300px;
+  cursor: pointer;
+  transition: transform .08s, filter .08s;
+}
+.big-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.big-btn:active { transform: translateY(1px); border-bottom-width: 2px; }
+.big-btn.ghost {
+  background: transparent; color: var(--paper);
+  border: 1px solid rgba(216,210,176,.5); border-bottom: 3px solid rgba(216,210,176,.5);
+}
+.big-btn:disabled { opacity: .4; cursor: default; }
+
+/* ---------- Skirmish setup ---------- */
+.setup-row { margin-bottom: 18px; }
+.setup-label { font-size: 11px; letter-spacing: 4px; color: var(--brass); margin-bottom: 8px; }
+
+.faction-pick { display: flex; gap: 16px; }
+.faction-card {
+  flex: 1; text-align: left; cursor: pointer;
+  background: rgba(0,0,0,.3);
+  border: 1px solid rgba(216,210,176,.25);
+  padding: 14px 16px;
+  color: var(--paper);
+  font-family: var(--font-mono);
+  transition: border-color .1s, background .1s;
+}
+.faction-card:hover { background: rgba(216,210,176,.08); }
+.faction-card.selected { border-color: var(--brass); background: rgba(var(--brass-rgb),.12); box-shadow: inset 0 0 24px rgba(var(--brass-rgb),.08); }
+.fc-emblem { font-size: 26px; }
+.fc-emblem.us { color: var(--us-bright); }
+.fc-emblem.vc { color: var(--vc-bright); }
+.fc-name { font-family: var(--font-head); font-size: 20px; letter-spacing: 3px; margin: 4px 0 2px; }
+.fc-doc { font-size: 10px; letter-spacing: 3px; color: var(--brass); margin-bottom: 8px; }
+.fc-desc { font-size: 11px; line-height: 1.55; color: var(--paper-dim); }
+
+.map-pick { display: flex; gap: 10px; flex-wrap: wrap; }
+.map-card {
+  cursor: pointer; width: 172px;
+  background: rgba(0,0,0,.3);
+  border: 1px solid rgba(216,210,176,.25);
+  padding: 10px 12px;
+  color: var(--paper);
+  font-family: var(--font-mono);
+  text-align: left;
+}
+.map-card:hover { background: rgba(216,210,176,.08); }
+.map-card.selected { border-color: var(--brass); background: rgba(var(--brass-rgb),.12); }
+.map-card .mc-name { font-family: var(--font-head); font-size: 15px; letter-spacing: 2px; }
+.map-card .mc-year { font-size: 10px; color: var(--brass); letter-spacing: 2px; margin: 2px 0 6px; }
+.map-card .mc-desc { font-size: 10px; line-height: 1.5; color: var(--paper-dim); }
+.map-card canvas { width: 100%; height: 44px; display: block; margin-bottom: 6px; background: #11150c; }
+
+.diff-pick { display: flex; gap: 10px; }
+.diff-btn {
+  font-family: var(--font-head); letter-spacing: 3px; font-size: 14px;
+  background: rgba(0,0,0,.3); color: var(--paper);
+  border: 1px solid rgba(216,210,176,.25);
+  padding: 8px 22px; cursor: pointer;
+}
+.diff-btn.selected { border-color: var(--brass); color: var(--brass); background: rgba(var(--brass-rgb),.1); }
+
+.setup-actions { display: flex; gap: 14px; justify-content: flex-end; margin-top: 22px; }
+.setup-actions.column { flex-direction: column; align-items: center; }
+
+/* ---------- Campaign ---------- */
+.campaign-note { font-size: 12px; color: var(--paper-dim); margin-bottom: 16px; line-height: 1.6; }
+#mission-list { display: flex; flex-direction: column; gap: 8px; }
+.mission-row.locked { opacity: .38; cursor: default; }
+
+/* ---------- Briefing ---------- */
+.brief-objectives { margin-top: 14px; font-size: 12px; line-height: 1.8; color: var(--us-bright); }
+
+/* ---------- Manual ---------- */
+.manual-cols { display: flex; gap: 30px; }
+.manual-col { flex: 1; }
+.manual ul { list-style: none; }
+.manual li { font-size: 11.5px; line-height: 1.6; margin-bottom: 7px; color: var(--paper-dim); padding-left: 14px; position: relative; }
+.manual li::before { content: '▸'; position: absolute; left: 0; color: var(--brass); }
+.manual li b { color: var(--paper); }
+
+/* ---------- Result ---------- */
+.result h2 { font-size: 44px; letter-spacing: 8px; }
+#result-title.win { color: var(--us-bright); }
+#result-title.lose { color: var(--danger); }
+#result-sub { font-size: 12px; color: var(--paper-dim); margin-bottom: 18px; line-height: 1.6; }
+#result-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; text-align: left; font-size: 12px; margin-bottom: 10px; }
+#result-stats .rs-label { color: var(--paper-dim); }
+#result-stats .rs-value { text-align: right; color: var(--paper); }
+
+/* ---------- Pause ---------- */
+.pause-buttons { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+
+/* ---------- HUD ---------- */
+#hud { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+#hud button { pointer-events: auto; }
+.morale-block { width: 300px; }
+.morale-block.right { text-align: right; }
+.morale-fill { height: 100%; transition: width .3s; }
+
+#hud-center { text-align: center; padding-top: 2px; }
+#flag-pips { display: flex; gap: 8px; justify-content: center; }
+.flag-pip {
+  width: 16px; height: 16px; border: 1px solid rgba(216,210,176,.5);
+  background: rgba(0,0,0,.5); transform: rotate(45deg);
+}
+.flag-pip.us { background: var(--us); }
+.flag-pip.vc { background: var(--vc); }
+#minimap {
+  display: block; margin: 6px auto 0;
+  border: 1px solid rgba(216,210,176,.35);
+  border-radius: 2px;
+  background: rgba(14,16,10,.8);
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 2px 6px rgba(0,0,0,.5);
+}
+
+#hud-controls { position: absolute; top: 54px; right: 14px; display: flex; gap: 6px; }
+#hud-controls button.off { color: rgba(216,210,176,.35); text-decoration: line-through; }
+#banner.show { opacity: 1; }
+#banner.danger { color: var(--danger); }
+
+#ticker {
+  position: absolute; left: 14px; bottom: 108px;
+  font-size: 11px; line-height: 1.7; letter-spacing: 1px;
+  color: rgba(216,210,176,.9);
+  text-shadow: 0 1px 2px #000;
+  pointer-events: none;
+}
+#ticker .tk-us { color: var(--us-bright); }
+#ticker .tk-vc { color: var(--vc-bright); }
+#ticker .tk-sys { color: var(--brass); }
+
+#unit-cards, #callin-cards { display: flex; gap: 6px; }
+#callin-divider { width: 1px; background: rgba(216,210,176,.3); margin: 4px 2px; }
+.card.unaffordable .card-cost { color: var(--danger); }
+.card canvas { width: 44px; height: 38px; }
+.card-cost { font-size: 11px; color: var(--brass); font-weight: bold; }
+.card-key {
+  position: absolute; top: 2px; left: 4px;
+  font-size: 9px; color: rgba(216,210,176,.55);
+}
+.card-cd {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,.72);
+  height: 0%;
+  pointer-events: none;
+}
+.card.callin { background: rgba(31,26,18,.92); }
+body.side-vc .card.callin { background: rgba(38,24,18,.92); }
+#squad-panel button:hover { border-color: var(--brass); color: var(--brass); }
+#squad-panel button:disabled { opacity: .45; cursor: default; }
+#squad-panel button i { font-style: normal; opacity: .55; font-size: 9px; margin-left: 3px; }
+
+#target-hint {
+  position: absolute; bottom: 104px; left: 50%; transform: translateX(-50%);
+  font-family: var(--font-head); font-size: 15px; letter-spacing: 3px;
+  color: var(--brass); text-shadow: 0 1px 3px #000;
+  background: rgba(8,10,6,.7); padding: 6px 18px;
+  border: 1px solid rgba(var(--brass-rgb),.5);
+  pointer-events: none;
+}
+
+/* ============================================================
+   TITLE SCREEN — painted key art, live buttons on the plates
+   Geometry matches assets/ui/menu_bg.jpg (1680x936):
+   plate column x 667..1025, rows at y 371 / 457 / 543, h 61
+   ============================================================ */
+#screen-menu {
+  background: url('../assets/ui/menu_bg.jpg') center/100% 100% no-repeat;
+  padding: 0;
+}
+#screen-menu .menu-inner { width: 100%; height: 100%; padding: 0; display: block; }
+/* the art already carries the title and the footer line */
+#screen-menu .title-block,
+#screen-menu .menu-footer { display: none; }
+
+#screen-menu .menu-buttons {
+  position: absolute; inset: 0;
+  display: block; gap: 0;
+  margin: 0;            /* the base rule's margin-top would shift the column */
+}
+#screen-menu .big-btn {
+  position: absolute;
+  left: 39.70%; width: 21.31%; height: 6.52%;
+  min-width: 0; margin: 0; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-head);
+  font-size: clamp(11px, 1.55vh, 21px);
+  letter-spacing: .16em;
+  color: #efe9d2;
+  text-shadow: 0 2px 3px rgba(0,0,0,.75);
+  background:
+    radial-gradient(circle at 3.2% 22%, #b9a877 0 14%, transparent 15%),
+    radial-gradient(circle at 3.2% 78%, #b9a877 0 14%, transparent 15%),
+    radial-gradient(circle at 96.8% 22%, #b9a877 0 14%, transparent 15%),
+    radial-gradient(circle at 96.8% 78%, #b9a877 0 14%, transparent 15%),
+    linear-gradient(180deg, #66744a 0%, #55643c 45%, #44522f 100%);
+  border: 1px solid #7d8a5c;
+  border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14),
+              inset 0 -2px 6px rgba(0,0,0,.45),
+              0 3px 10px rgba(0,0,0,.5);
+  cursor: pointer;
+  transition: filter .12s, transform .12s;
+}
+#screen-menu .big-btn::before,
+#screen-menu .big-btn::after {
+  content: '★';
+  position: absolute; top: 50%; transform: translateY(-50%);
+  color: var(--brass); font-size: .95em; text-shadow: 0 1px 2px rgba(0,0,0,.6);
+}
+#screen-menu .big-btn::before { left: 9%; }
+#screen-menu .big-btn::after  { right: 9%; }
+#screen-menu #btn-campaign { top: 39.64%; }
+#screen-menu #btn-skirmish { top: 48.82%; }
+#screen-menu #btn-help     { top: 58.01%; }
+#screen-menu .big-btn:hover {
+  filter: brightness(1.18) saturate(1.05);
+  transform: translateY(-1px);
+}
+#screen-menu .big-btn:active { transform: translateY(1px); filter: brightness(.94); }
+
+#screen-menu #load-status {
+  position: absolute; left: 2.2%; bottom: 3.4%;
+  font-family: var(--font-head); font-size: 12px; letter-spacing: .14em;
+  color: rgba(232,226,200,.75); text-shadow: 0 1px 3px #000;
+}
+
+/* ============================================================
+   UI RESKIN — field-manual look from the concept art:
+   dark olive metal panels, brass rivets + stencil headings,
+   riveted plate buttons, jungle key art behind every screen
+   ============================================================ */
+.screen:not(#screen-menu):not(.translucent) {
+  background:
+    linear-gradient(rgba(8,10,6,.72), rgba(8,10,6,.86)),
+    url('../assets/ui/menu_bg.jpg') center/cover no-repeat;
+}
+.screen.translucent {
+  background:
+    linear-gradient(rgba(8,10,6,.66), rgba(8,10,6,.78)),
+    url('../assets/ui/menu_bg.jpg') center/cover no-repeat;
+}
+
+.panel {
+  padding: 26px 34px;
+  max-height: 92%;
+  overflow-y: auto;
+  position: relative;
+  background:
+    radial-gradient(circle at 1.1% 3.2%, #b9a877 0 .34%, transparent .36%),
+    radial-gradient(circle at 98.9% 3.2%, #b9a877 0 .34%, transparent .36%),
+    radial-gradient(circle at 1.1% 96.8%, #b9a877 0 .34%, transparent .36%),
+    radial-gradient(circle at 98.9% 96.8%, #b9a877 0 .34%, transparent .36%),
+    linear-gradient(158deg, #333f26 0%, #2b361f 46%, #222b19 100%);
+  border: 2px solid #55643a;
+  outline: 5px solid rgba(0,0,0,.45);
+  box-shadow: 0 18px 70px rgba(0,0,0,.75), inset 0 0 90px rgba(0,0,0,.45);
+}
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 1px dashed rgba(216,210,176,.22);
+  pointer-events: none;
+  border-color: rgba(var(--brass-rgb),.16);
+}
+
+h2 {
+  font-family: var(--font-head);
+  font-size: 30px;
+  letter-spacing: 5px;
+  margin-bottom: 16px;
+  color: var(--brass);
+  text-shadow: 0 2px 0 rgba(0,0,0,.6), 0 0 22px rgba(var(--brass-rgb),.18);
+  border-bottom: 1px solid rgba(var(--brass-rgb),.22);
+  padding-bottom: 10px;
+}
+
+/* ---- mission list: olive plates with brass numerals ---- */
+.mission-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  color: var(--paper);
+  text-align: left;
+  width: 100%;
+  background: linear-gradient(180deg, #3d4a2b 0%, #313d23 55%, #2a3420 100%);
+  border: 1px solid #4f5d36;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 2px 6px rgba(0,0,0,.4);
+  padding: 12px 18px;
+  position: relative;
+}
+.mission-row::after {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: transparent;
+}
+.mission-row:hover:not(.locked) {
+  background: linear-gradient(180deg, #4a5934 0%, #3c4a2a 100%);
+  border-color: var(--brass);
+}
+.mission-row:hover:not(.locked)::after { background: var(--brass); }
+.mission-row .m-check {
+  font-size: 16px;
+  color: var(--brass);
+  width: 18px;
+}
+.mission-row .m-num {
+  font-family: var(--font-head);
+  font-size: 24px;
+  width: 34px;
+  color: var(--brass);
+  text-shadow: 0 2px 0 rgba(0,0,0,.5);
+}
+.mission-row .m-name {
+  font-family: var(--font-head);
+  font-size: 17px;
+  letter-spacing: 2px;
+  color: #ece5c6;
+}
+.mission-row .m-meta {
+  font-size: 10px;
+  margin-top: 2px;
+  color: rgba(216,210,176,.62);
+  letter-spacing: 1.5px;
+}
+.mission-row .m-side {
+  margin-left: auto;
+  letter-spacing: 2px;
+  font-size: 12px;
+}
+.mission-row .m-side.us {
+  color: var(--paper);
+}
+.mission-row .m-side.vc {
+  color: var(--vc-bright);
+}
+.mission-row.locked .m-side::after { content: ' 🔒'; }
+
+/* ---- plate buttons everywhere outside the title screen ---- */
+.screen:not(#screen-menu) .big-btn,
+.setup-actions .big-btn {
+  font-family: var(--font-head);
+  letter-spacing: .16em;
+  color: #efe9d2;
+  background:
+    radial-gradient(circle at 3.5% 24%, #b9a877 0 13%, transparent 14%),
+    radial-gradient(circle at 3.5% 76%, #b9a877 0 13%, transparent 14%),
+    radial-gradient(circle at 96.5% 24%, #b9a877 0 13%, transparent 14%),
+    radial-gradient(circle at 96.5% 76%, #b9a877 0 13%, transparent 14%),
+    linear-gradient(180deg, #66744a 0%, #55643c 45%, #44522f 100%);
+  border: 1px solid #7d8a5c;
+  border-bottom: 1px solid #7d8a5c;
+  border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.13),
+              inset 0 -2px 6px rgba(0,0,0,.42), 0 3px 9px rgba(0,0,0,.45);
+  padding: 12px 34px;
+  min-width: 220px;
+}
+.screen:not(#screen-menu) .big-btn:hover { filter: brightness(1.16); }
+.screen:not(#screen-menu) .big-btn.ghost {
+  background: linear-gradient(180deg, #3a4529 0%, #2e3820 100%);
+  color: #cfc9a8; border-color: #55643a;
+}
+/* the confirming action reads as brass, like COMMENCE OPERATION */
+#btn-skirmish-start, #btn-brief-start, #btn-next-mission {
+  color: #241f12;
+  background:
+    radial-gradient(circle at 3.5% 24%, #8a7648 0 13%, transparent 14%),
+    radial-gradient(circle at 3.5% 76%, #8a7648 0 13%, transparent 14%),
+    radial-gradient(circle at 96.5% 24%, #8a7648 0 13%, transparent 14%),
+    radial-gradient(circle at 96.5% 76%, #8a7648 0 13%, transparent 14%),
+    linear-gradient(180deg, #efe6c2 0%, #ddd0a4 48%, #c6b783 100%);
+  border-color: #efe6c2;
+  text-shadow: none;
+}
+
+/* ---- briefing ---- */
+.brief-stamp {
+  position: absolute;
+  top: 18px;
+  right: 22px;
+  font-size: 13px;
+  color: var(--vc-bright);
+  border: 2px solid var(--vc-bright);
+  transform: rotate(-7deg);
+  letter-spacing: 3px;
+  padding: 5px 12px;
+  font-family: var(--font-head);
+  opacity: .85;
+}
+.brief-meta {
+  font-size: 11px;
+  margin-bottom: 14px;
+  color: var(--brass);
+  letter-spacing: 2px;
+}
+.brief-body {
+  font-size: 13px;
+  white-space: pre-wrap;
+  min-height: 120px;
+  color: #d9d3b4;
+  line-height: 1.72;
+}
+.brief-objectives div { color: #cbe0a0; }
+.brief-objectives .obj-vc {
+  color: var(--vc-bright);
+}
+
+/* ---- setup screens ---- */
+.faction-card, .map-card, .diff-btn {
+  background: linear-gradient(180deg, rgba(58,69,41,.55), rgba(38,46,27,.65));
+  border-color: #4c5936;
+}
+.faction-card.selected, .map-card.selected, .diff-btn.selected {
+  border-color: var(--brass);
+  background: linear-gradient(180deg, rgba(90,80,45,.4), rgba(60,55,30,.5));
+  box-shadow: inset 0 0 30px rgba(var(--brass-rgb),.12);
+}
+
+/* ============================================================
+   IN-MATCH HUD — riveted field kit to match the concept art
+   ============================================================ */
+
+.card {
+  position: relative;
+  width: 78px;
+  height: 84px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 3px;
+  overflow: hidden;
+  transition: border-color .1s;
+  background:
+    radial-gradient(circle at 6% 8%, rgba(var(--brass-rgb),.85) 0 5%, transparent 6%),
+    radial-gradient(circle at 94% 8%, rgba(var(--brass-rgb),.85) 0 5%, transparent 6%),
+    linear-gradient(180deg, #3c4a2b 0%, #2f3a22 60%, #26301b 100%);
+  border: 1px solid #55643a;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 2px 6px rgba(0,0,0,.45);
+  border-radius: 3px;
+}
+.card:hover {
+  border-color: var(--brass);
+}
+.card.armed {
+  border-color: var(--brass);
+  box-shadow: 0 0 14px rgba(var(--brass-rgb),.55), inset 0 0 14px rgba(var(--brass-rgb),.22);
+}
+.card-men {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 9px;
+  font-weight: bold;
+  color: var(--brass);
+}
+.morale-fill.us {
+  background: linear-gradient(180deg, #b9cf8f, #7d9455);
+}
+.morale-fill.vc {
+  float: right;
+  background: linear-gradient(180deg, #e8917a, #b3452f);
+}
+#banner {
+  position: absolute;
+  top: 26%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 46px;
+  letter-spacing: 10px;
+  color: var(--paper);
+  opacity: 0;
+  transition: opacity .25s;
+  pointer-events: none;
+  font-family: var(--font-head);
+  text-shadow: 0 3px 0 rgba(0,0,0,.6), 0 0 30px rgba(var(--brass-rgb),.35);
+}
+
+#squad-panel {
+  position: absolute;
+  bottom: 108px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 2px;
+  font-family: var(--font-head);
+  letter-spacing: 1px;
+  z-index: 6;
+  background: linear-gradient(180deg, rgba(30,38,22,.95), rgba(18,24,13,.96));
+  border: 1px solid rgba(var(--brass-rgb),.5);
+  box-shadow: 0 6px 20px rgba(0,0,0,.6);
+}
+#squad-panel .sp-name {
+  font-size: 12px;
+  margin-right: 6px;
+  color: var(--brass);
+}
+#squad-panel button {
+  color: var(--paper);
+  font-family: var(--font-head);
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  padding: 4px 8px;
+  cursor: pointer;
+  background: linear-gradient(180deg, #4a5834, #3a4728);
+  border: 1px solid #66754a;
+  border-radius: 2px;
+}
+#squad-panel button:hover:not(:disabled) { border-color: var(--brass); color: var(--brass); }
+
+/* ============================================================
+   RESPONSIVE UI SCALING
+   The battlefield is a fixed 1280x720 design. Every UI layer is
+   laid out at that size and then scaled to whatever the stage
+   actually is, so proportions are identical on a phone and on a
+   5K Mac — no more fonts that are huge on small screens and
+   postage-stamp sized on big ones.
+   ============================================================ */
+#hud, .screen {
+  width: 1280px;
+  height: 720px;
+  left: 0; top: 0; right: auto; bottom: auto;
+  transform-origin: top left;
+  transform: scale(var(--uiK, 1));
+}
+
+
+/* ---- command perks (skirmish screen) ---- */
+.perk-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.perk-card {
+  width: 148px; text-align: left; padding: 6px 8px;
+  background: linear-gradient(180deg, #3b432c, #2c3321);
+  border: 1px solid #59633f; border-radius: 2px;
+  color: #cdd6b4; font: 9px 'Courier New', monospace; cursor: pointer;
+}
+.perk-card:hover:not(.owned):not(.locked) { border-color: #93a468; background: #454e33; }
+.perk-card .pk-name { font-weight: bold; letter-spacing: .06em; color: #e2e9c9; }
+.perk-card .pk-desc { opacity: .72; line-height: 1.28; margin-top: 3px; }
+.perk-card .pk-cost { float: right; color: #d8c169; }
+.perk-card.owned { border-color: #7f9a55; background: #38471f; cursor: default; }
+.perk-card.owned .pk-cost::after { content: ' ✔'; }
+.perk-card.locked { opacity: .45; cursor: not-allowed; }
+#perk-points { color: #d8c169; letter-spacing: .08em; }
+
+/* ============================================================
+   CARD STAT PIPS + UNIT INFO
+   Reference art shows what a unit is worth on the card itself and in a
+   detail panel, rather than making the player learn it by dying. Both are
+   built from UNITS/SQUADS at runtime, so they cannot disagree with the sim.
+   DOM, so they cost nothing per frame.
+   ============================================================ */
+.card-pips {
+  position: absolute; left: 4px; right: 4px; bottom: 15px;
+  display: flex; gap: 5px; justify-content: center;
+  pointer-events: none;
+}
+.pip-row { display: inline-flex; gap: 1.5px; align-items: center; }
+.pip-row i {
+  width: 4px; height: 5px; display: block;
+  background: rgba(255,255,255,.16);
+  border-radius: .5px;
+}
+.pip-row.fire  i.on { background: #d8a24e; }
+.pip-row.tough i.on { background: #8fae63; }
+
+#unit-info {
+  position: absolute; bottom: 132px; left: 50%; transform: translateX(-50%);
+  width: 300px; z-index: 8; pointer-events: none;
+  background: linear-gradient(180deg, rgba(26,32,19,.97), rgba(14,18,11,.98));
+  border: 1px solid rgba(var(--brass-rgb),.55);
+  box-shadow: 0 8px 26px rgba(0,0,0,.65);
+  padding: 9px 11px; border-radius: 2px;
+  font-family: var(--font-mono); color: var(--paper);
+}
+#unit-info.hidden { display: none; }
+#unit-info .ui-stats div {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 9px; letter-spacing: 1px; opacity: .82; margin: 3px 0;
+}
+#unit-info .ui-stats em { display: inline-flex; gap: 2px; font-style: normal; }
+#unit-info .ui-stats i {
+  width: 13px; height: 5px; display: block;
+  background: rgba(255,255,255,.15); border-radius: .5px;
+}
+#unit-info .ui-stats i.on { background: var(--brass); }
+#unit-info .ui-cost {
+  margin-top: 7px; text-align: right;
+  font-family: var(--font-head); font-size: 12px; letter-spacing: 1px; color: var(--brass);
+}
+#unit-info .ui-cost.short { color: #c9694e; }
+
+/* on a phone the panel would cover the battlefield it is describing */
+body.touch #unit-info { display: none !important; }
+
+/* ============================================================================
+   FIELD-MANUAL HUD PLATES
+   ============================================================================
+   Ported from the approved design canvas in design/hud/. The vocabulary was
+   already right — 78x84 cards with brass corner rivets, 13px morale bars,
+   Impact over Courier, the --brass/--paper/--olive tokens — so this changes the
+   TREATMENT, not the layout: stamped metal and field-manual paper instead of
+   soft rounded panels.
+
+   Appended deliberately. #hud-controls button is declared four separate times
+   further up the file and #hud-bottom twice, accumulated over successive
+   passes; untangling that is its own job, and until it happens the cascade is
+   the only reliable way to land a change.
+
+   Three devices carry it:
+     - CHAMFERED corners instead of rounded ones. Stamped plate, not a bubble.
+     - hairline brass rules, not heavy borders.
+     - one emphasised element per region (the CP plate), so the eye has a
+       fixed anchor rather than a row of equals.
+   ============================================================================ */
+
+/* the notch, at two sizes */
+#cp-display,
+#hud-controls button,
+#squad-panel,
+#unit-info {
+  border-radius: 0;
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px),
+                     calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+
+/* the bottom plate: a rule, not a glow */
+#hud-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px 12px;
+  pointer-events: auto;
+  padding-top: 6px;
+  border-top: 1px solid rgba(var(--brass-rgb), .5);
+  box-shadow: 0 -1px 0 rgba(var(--brass-rgb), .14), 0 -10px 30px rgba(0, 0, 0, .6);
+  background:
+    linear-gradient(180deg, rgba(20, 25, 15, .55) 0%,
+                            rgba(14, 18, 10, .94) 38%,
+                            rgba(10, 13, 7, .98) 100%);
+}
+
+/* command points — the one brass-plated thing on the bar, so the eye has an
+   anchor. Everything else on the plate is deliberately quieter than this. */
+#cp-display {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-width: 76px;
+  background: linear-gradient(180deg, var(--plate-hi), var(--plate-lo));
+  border: 1px solid rgba(var(--brass-rgb), .55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 2px 10px rgba(0, 0, 0, .5);
+}
+#cp-value {
+  font-size: 30px;
+  line-height: 1;
+  font-family: var(--font-head);
+  color: var(--brass);
+  letter-spacing: 1px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .6);
+}
+.cp-label {
+  margin-top: 2px;
+  letter-spacing: 3px;
+  color: #8c9668;
+  font-size: 9px;
+}
+
+/* stencilled controls */
+#hud-controls button {
+  font-family: var(--font-head);
+  font-size: 12px;
+  letter-spacing: 1px;
+  width: 40px;
+  height: 30px;
+  cursor: pointer;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px),
+                     calc(100% - 5px) 100%, 0 100%, 0 5px);
+  background: linear-gradient(180deg, var(--plate-hi), var(--plate-lo));
+  border: 1px solid rgba(var(--brass-rgb), .34);
+  color: var(--paper);
+  transition: border-color .1s, color .1s;
+}
+#hud-controls button:hover {
+  border-color: var(--brass);
+  color: var(--brass);
+  background: linear-gradient(180deg, var(--plate-hi-h), var(--plate-lo-h));
+}
+
+/* the top band reads as a printed strip rather than a fade */
+#hud-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(var(--brass-rgb), .22);
+  background: linear-gradient(180deg, rgba(20, 25, 15, .90) 0%,
+                                      rgba(14, 18, 10, .78) 58%,
+                                      rgba(14, 18, 10, 0) 100%);
+}
+.morale-label {
+  font-family: var(--font-head);
+  font-size: 13px;
+  margin-bottom: 4px;
+  text-shadow: 0 1px 2px #000;
+  color: #e6dfbe;
+  letter-spacing: 3px;
+}
+#objective-line {
+  font-size: 11px;
+  margin-top: 8px;
+  text-shadow: 0 1px 2px #000;
+  color: var(--brass);
+  letter-spacing: 3px;
+}
+
+/* morale bars get ranging ticks — a bare bar reads as a health bar from any
+   other game; the graduations are what make it an instrument */
+.morale-bar {
+  border: 1px solid rgba(var(--brass-rgb),.4);
+  background: rgba(0,0,0,.55);
+  box-shadow: inset 0 1px 4px rgba(0,0,0,.6);
+  height: 13px;
+  position: relative;
+}
+.morale-bar::after {
+  content: '';
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(90deg,
+    transparent 0 24px, rgba(0, 0, 0, .45) 24px 25px);
+}
+
+/* info and squad panels: manual pages, with a brass rule under the heading */
+#unit-info, #squad-panel {
+  background: linear-gradient(180deg, #2b3319 0%, #1e2412 62%, #171c0e 100%);
+  border: 1px solid rgba(var(--brass-rgb), .45);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+#unit-info .ui-head {
+  padding-bottom: 5px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(var(--brass-rgb), .28);
+  background: linear-gradient(180deg, rgba(var(--brass-rgb), .10), transparent);
+}
+#unit-info .ui-name {
+  font-size: 13px;
+  font-family: var(--font-head);
+  letter-spacing: 2px;
+  color: #e6dfbe;
+}
+#unit-info .ui-role {
+  font-size: 9.5px;
+  opacity: .66;
+  margin-top: 2px;
+  letter-spacing: 2px;
+  color: #8aa06b;
+}
+/* the ability block, set in from the edge like a manual sidebar */
+#unit-info .ui-trait {
+  margin-top: 6px;
+  padding-top: 5px;
+  font-size: 9.5px;
+  line-height: 1.4;
+  border-top: 1px solid rgba(var(--brass-rgb),.22);
+  opacity: .8;
+  font-style: italic;
+  border-left: 2px solid var(--brass);
+  background: rgba(8, 11, 5, .55);
+  padding-left: 9px;
+}
+
+/* cards keep their rivets; the name goes stencil */
+.card-name {
+  font-size: 9.5px;
+  margin-top: 1px;
+  white-space: nowrap;
+  color: #e6dfbe;
+  font-family: var(--font-head);
+  letter-spacing: .5px;
+}
+.card-key, .card-men { color: #8c9668; }
+
+
+/* ---- HUD GROUP RAILS -------------------------------------------------------
+ * Appended, like the rest of the field-manual pass, because `#unit-cards` and
+ * `#hud-controls button` are each declared several times higher up and the
+ * cascade is the only reliable way to land on top of all of them.
+ *
+ * The label sits ON a hairline rule rather than above it — the rule runs the
+ * width of the group and the label interrupts it, which is the printed-form
+ * convention the rest of this HUD borrows from. */
+#unit-cards { align-items: flex-end; gap: calc(13px * var(--uiK, 1)); }
+
+.card-group { display: flex; flex-direction: column; gap: calc(3px * var(--uiK, 1)); }
+
+/* The label and its rule are ONE flex row spanning the group. A first version
+ * absolutely positioned the rule at `left: 100%` with a fixed 200px width,
+ * which ran it straight over the next group's cards — the rule has to be
+ * bounded by the group it belongs to, so it is a flex child that takes the
+ * leftover width instead of a fixed length. */
+.group-label {
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--uiK, 1));
+  width: 100%;
+  font: 700 calc(9px * var(--uiK, 1))/1 'Courier New', Courier, monospace;
+  letter-spacing: calc(1.3px * var(--uiK, 1));
+  color: var(--brass, #b79b5b);
+  opacity: 0.78;
+  padding-left: calc(2px * var(--uiK, 1));
+  white-space: nowrap;
+}
+.group-label::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  min-width: calc(6px * var(--uiK, 1));
+  background: linear-gradient(90deg, var(--brass, #b79b5b), rgba(183,155,91,0.15));
+  opacity: 0.5;
+}
+
+.group-rail { display: flex; gap: calc(6px * var(--uiK, 1)); }
