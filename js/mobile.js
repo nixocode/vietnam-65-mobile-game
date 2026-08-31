@@ -24,8 +24,25 @@ const Mobile = {
   _drag: null,
   _suppressClick: false,
 
-  // a pan under this many CSS pixels is a tap, not a drag
-  TAP_SLOP: 11,
+  /* A pan under this many CSS pixels is a tap, not a drag.
+   *
+   * 11 was far too tight and it is the reported "can't select or drop squads
+   * quickly" bug. A finger on glass moves several pixels during an ordinary
+   * tap — more on a small target, more still if the player is rushing — and
+   * every tap that crossed 11px was reclassified as a drag and had its click
+   * swallowed. So selections and deployments were dropped exactly when the
+   * player was going fast, which is when they matter.
+   *
+   * 22 is about a fingertip's natural wobble and still well under a deliberate
+   * pan. */
+  TAP_SLOP: 22,
+
+  /* How far the camera must ACTUALLY have moved before the click is eaten.
+   *
+   * Crossing the slop only means the finger wandered; it does not mean the
+   * player was panning. The click is suppressed only when the camera really
+   * travelled, so a shaky tap still selects. */
+  PAN_KILL: 14,
 
   init() {
     /* MOBILE BUILD: always on. The desktop fork detected touch because it had
@@ -50,7 +67,7 @@ const Mobile = {
     cv.addEventListener('touchstart', (e) => {
       if (e.touches.length !== 1) { this._drag = null; return; }
       const t = e.touches[0];
-      this._drag = { x: t.clientX, y: t.clientY, x0: t.clientX, moved: false };
+      this._drag = { x: t.clientX, y: t.clientY, x0: t.clientX, moved: false, panned: 0 };
     }, { passive: true });
 
     cv.addEventListener('touchmove', (e) => {
@@ -65,7 +82,9 @@ const Mobile = {
          * pixel — convert through the element's rendered width or the map
          * crawls on a small screen and races on a large one. */
         const k = CANVAS_W / (cv.clientWidth || CANVAS_W);
+        const before = Camera.targetX;
         Camera.pan(-dx * k);
+        d.panned += Math.abs(Camera.targetX - before);
         // land it immediately: easing a direct drag feels like lag
         Camera.x = Camera.targetX;
         e.preventDefault();
@@ -74,10 +93,15 @@ const Mobile = {
     }, { passive: false });
 
     const end = () => {
-      if (this._drag && this._drag.moved) {
-        // the browser still fires a click after a drag; swallow exactly one
+      /* Only a drag that MOVED THE MAP eats the click, and only briefly.
+       *
+       * This used to fire on `moved` alone — any wobble past the slop — and
+       * held the suppression for 350ms, which is long enough to swallow the
+       * player's next deliberate tap as well. Both halves were costing taps. */
+      const d = this._drag;
+      if (d && d.moved && d.panned >= this.PAN_KILL) {
         this._suppressClick = true;
-        setTimeout(() => { this._suppressClick = false; }, 350);
+        setTimeout(() => { this._suppressClick = false; }, 120);
       }
       this._drag = null;
     };

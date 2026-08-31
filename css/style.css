@@ -1071,3 +1071,108 @@ body.touch #unit-info { display: none !important; }
 }
 
 .group-rail { display: flex; gap: calc(6px * var(--uiK, 1)); }
+
+/* ============================================================
+   TOUCH HUD LEGIBILITY
+   Measured on a 844x390 phone in landscape: --uiK is 0.54, so a
+   design pixel is barely half a device pixel. The BUTTONS were
+   already handled — they divide the scale back out and land at
+   44px. Everything that is read rather than pressed was not, and
+   it measured like this:
+
+     unit card name    5.1 device px
+     card men count    4.9
+     CP label          4.9
+     group rail label  2.6   (double-scaled: authored as 9px * uiK
+                              and then scaled by uiK again)
+     morale label      7.0
+
+   Five-pixel type on the control the player taps most is the
+   "HUD is super small" complaint, and no amount of touch-target
+   sizing fixes it — a 44px card you cannot read is still a card
+   you cannot read.
+
+   Everything below is expressed as the DEVICE size the element
+   should end up at, divided back out of the scale. Scoped to
+   body.touch so the desktop layout is untouched.
+   ============================================================ */
+body.touch .card {
+  /* The purchase control. It was 42x45 device px with 5px type on it.
+   *
+   * Width is the one dimension that CANNOT grow much: twelve cards plus the
+   * CP readout have to fit across 693 device px, and a 62px card pushed the
+   * call-in row 167px off the right edge of the screen. So the card gets
+   * height and type instead, and the name wraps to two lines rather than
+   * being clipped by `nowrap` in a narrow box. */
+  width: calc(46px / var(--uiK, 1));
+  height: calc(64px / var(--uiK, 1));
+  padding-top: calc(2px / var(--uiK, 1));
+}
+body.touch .card canvas {
+  width: calc(37px / var(--uiK, 1));
+  height: calc(27px / var(--uiK, 1));
+}
+body.touch .card-name {
+  font-size: calc(8px / var(--uiK, 1));
+  letter-spacing: 0;
+  white-space: normal;
+  line-height: 1.04;
+  text-align: center;
+  max-width: 100%;
+}
+body.touch .card-cost { font-size: calc(11px / var(--uiK, 1)); }
+body.touch .card-men  { font-size: calc(9px / var(--uiK, 1)); top: calc(2px / var(--uiK, 1)); right: calc(3px / var(--uiK, 1)); }
+body.touch .card-key  { font-size: calc(8px / var(--uiK, 1)); }
+body.touch .card-pips { bottom: calc(11px / var(--uiK, 1)); }
+
+/* The group rails were the worst offender: their sizes MULTIPLY by the
+   scale and are then scaled again, so a 9px label rendered at 2.6px. */
+body.touch #unit-cards { gap: calc(10px / var(--uiK, 1)); }
+body.touch .card-group { gap: calc(3px / var(--uiK, 1)); }
+body.touch .group-rail { gap: calc(5px / var(--uiK, 1)); }
+body.touch .group-label {
+  font-size: calc(8px / var(--uiK, 1));
+  gap: calc(4px / var(--uiK, 1));
+  letter-spacing: calc(0.8px / var(--uiK, 1));
+  padding-left: calc(2px / var(--uiK, 1));
+}
+body.touch .group-label::after { min-width: calc(6px / var(--uiK, 1)); }
+
+/* Top bar readouts */
+body.touch .morale-label { font-size: calc(10px / var(--uiK, 1)); }
+body.touch .cp-label { font-size: calc(8px / var(--uiK, 1)); }
+body.touch #cp-display { font-size: calc(15px / var(--uiK, 1)); }
+
+/* The cover order is the one button whose label changes with the state of the
+   squad, and it is the one the player is watching the clock on. */
+#squad-panel button.sp-danger {
+  border-color: var(--danger, #c8553d);
+  color: #ffd2c2;
+  animation: sp-danger-pulse 0.9s ease-in-out infinite;
+}
+@keyframes sp-danger-pulse {
+  0%, 100% { background: rgba(160,58,38,0.30); }
+  50%      { background: rgba(200,85,61,0.62); }
+}
+
+/* The squad panel sits a fixed distance above the bottom of the stage, and the
+   card bar underneath it just got taller — measured, they overlapped by 31
+   device px, so the order buttons were sitting on top of the cards. Anchor the
+   panel in DEVICE pixels clear of the bar rather than in design pixels that
+   shrink with the scale. */
+/* The order panel goes to the TOP on a phone, not above the card bar.
+ *
+ * Anchored above the bar it measured as clearing the cards by 5px and sitting
+ * directly on the near lane: at 390 device px tall the near lane's ground is at
+ * y295 and the card bar starts at y307, so the only band left for the panel was
+ * exactly where the squad you just selected is standing. The sky is the one
+ * region of this screen with nothing in it — 390px is short enough that the
+ * horizon is dead space — so the panel goes there, clear of the controls above
+ * it and of the far lane below.
+ *
+ * The cost is thumb reach, which is real. It is the smaller cost: buttons you
+ * stretch for beat buttons that hide the men they command. */
+body.touch #squad-panel {
+  top: calc(74px / var(--uiK, 1));
+  bottom: auto;
+}
