@@ -53,9 +53,20 @@ const COVER = {
   DIG_TIME:    13,     // seconds of holding still to fully improve a position
   DIG_MAX:     0.15,   // protection a fully improved position adds
   PROT_CAP:    0.82,
-  RANGE_TIME:  17,     // seconds in one spot before the enemy has it ranged
+  /* Timed against DIG_TIME, not picked in isolation.
+   *
+   * At 17s the ranging round landed four seconds after the position finished
+   * improving — measured on a held squad: protection reached its 0.77 ceiling
+   * at 13s and the warning came at 17.0, so the reward for digging in was worth
+   * about four seconds and the only correct play was to keep moving. That is
+   * not a timing decision, it is a metronome.
+   *
+   * 26s leaves a real window at full protection to be worth holding for, and
+   * still ends. A squad that ignores the warning is down to an eighth of its
+   * strength inside half a minute. */
+  RANGE_TIME:  26,     // seconds in one spot before the enemy has it ranged
   RANGE_WARN:  3.6,    // ranging round lands, then this long before fire-for-effect
-  RANGE_RATE:  4.4,    // seconds between rounds once they are on target
+  RANGE_RATE:  5.6,    // seconds between rounds once they are on target
 };
 
 /* Squads a side may have in the field at once.
