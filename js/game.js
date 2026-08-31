@@ -2196,9 +2196,22 @@ class Game {
       const oc = s.cover.occ.length || 1;
       const oi = Math.max(0, s.cover.occ.indexOf(s));
       const share = s.cover.w / oc;
-      const centre = s.cover.x + (oi - (oc - 1) / 2) * share;
+      /* 0.6 of a full share, not a full one. At full spacing three squads in a
+       * long trench spanned 190px against a 152px bank and the outside men
+       * stood clear of it with their legs showing — crowded troops that do not
+       * fit in the hole they are crowding. */
+      const centre = s.cover.x + (oi - (oc - 1) / 2) * share * 0.6;
       const spread = Math.max(floor, Math.min(want, share / Math.max(2, alive.length)));
       tx = centre - s.dir * (idx - (alive.length - 1) / 2) * spread;
+      /* Nobody stands outside the hole they are in.
+       *
+       * Spacing has a floor — men need room to draw — so two or three squads
+       * sharing a position want more width than the position has, and the ones
+       * on the outside ended up in the parapet's taper with their legs showing
+       * below the bank. Clamping to the cover's own width makes them bunch up
+       * at the ends instead, which is what crowding looks like anyway. */
+      const half = s.cover.w / 2 - 6;
+      tx = clamp(tx, s.cover.x - half, s.cover.x + half);
     } else {
       /* 34 was not enough room. A man is 84px tall and his levelled rifle is
        * about 40px wide on its own, so at 34px spacing every soldier overlapped

@@ -3711,7 +3711,7 @@ const Renderer = {
      * the parapet a long way off the scene. These are the browns the crater and
      * the old trench mounds already use in this same pass, which are known to
      * sit correctly. */
-    const EARTH = '#5c4a2e', EARTH_LIP = '#6b5636';
+    const EARTH = '#5c4a2e', EARTH_LIP = '#5f4d31';
     /* WHERE THE MEN ACTUALLY ARE.
      *
      * `groundY` is not the plane a soldier stands on. Measured by rendering a
@@ -3725,7 +3725,7 @@ const Renderer = {
      * of shin and boot hanging below the bank, which is precisely the "standing
      * on it, not in it" look this pass exists to fix. So the near bank runs
      * down to the boot line. */
-    const BOOT = 34 * dep;
+    const BOOT = 42 * dep;
 
     if (!fore) {
       const spoil = EARTH;
@@ -3783,13 +3783,20 @@ const Renderer = {
     const bell = x => Math.pow(Math.sin(Math.PI *
       Math.min(1, Math.max(0, (x - x0) / Math.max(1, x1 - x0)))), 0.55);
     const top = (x, i) =>
-      gy(x) - (11 * bell(x) + Math.sin((x - x0) * 0.16) * 1.6 + jit[i] * 2) * dep;
-    /* The FOOT tapers too. With a flat bottom the polygon closed with a vertical
-     * drop of 34px at each end — a sheer cut through the earth, which is what
-     * made the first tapered version still read as a slab dropped on the
-     * ground. Both edges converge, so the bank fades out at its ends the way
-     * spoil actually lies. */
-    const foot = x => gy(x) + BOOT * Math.pow(bell(x), 0.8);
+      gy(x) - (9 * bell(x) + Math.sin((x - x0) * 0.16) * 1.6 + jit[i] * 2) * dep;
+    /* The FOOT tapers too, but only across the PADS.
+     *
+     * With a flat bottom the polygon closed with a sheer vertical drop at each
+     * end. With the taper driven by the same bell as the crest it started
+     * rising immediately, so the men at the outside of a crowded trench had
+     * their legs hanging below the bank — the exact thing this pass exists to
+     * stop. The 22px pads either side are what the taper is for; inside the
+     * cover's own width the bank runs full depth. */
+    const in0 = c.x - c.w / 2, in1 = c.x + c.w / 2;
+    const padK = x => x < in0 ? Math.max(0, (x - x0) / pad)
+                    : x > in1 ? Math.max(0, (x1 - x) / pad) : 1;
+    // >1 so the toe comes out of the ground gradually instead of stepping up
+    const foot = x => gy(x) + BOOT * Math.pow(padK(x), 1.4);
     const band = (fill, lift) => {
       ctx.beginPath();
       cols.forEach((x, i) => (i ? ctx.lineTo(x, top(x, i) + lift)
@@ -3801,6 +3808,19 @@ const Renderer = {
     band(EARTH_LIP, 0);
     band('rgba(255,244,214,0.10)', 0);          // light catching the crest
     band(EARTH_LIP, 2.6 * dep);                 // ...only the top 2.6px of it
+    /* CLODS. At desktop scale the bank was a smooth lens — a pebble, not spoil.
+     * A handful of turned-over lumps along the crest is what earth thrown out of
+     * a hole actually looks like, and it is the cheapest way to stop a large
+     * flat fill reading as a single moulded object. */
+    for (let k = 0; k < cols.length; k += 3) {
+      const x = cols[k], j = jit[k];
+      if (j < 0.34) continue;
+      const r = (2.2 + j * 3.4) * dep;
+      ctx.fillStyle = j > 0.72 ? 'rgba(0,0,0,0.16)' : 'rgba(255,244,214,0.09)';
+      ctx.beginPath();
+      ctx.ellipse(x, top(x, k) + (2 + j * 5) * dep, r, r * 0.62, 0, 0, 7);
+      ctx.fill();
+    }
     // the bank falls away into shadow toward the camera
     ctx.fillStyle = 'rgba(0,0,0,0.26)';
     ctx.beginPath();
@@ -3827,10 +3847,31 @@ const Renderer = {
   _drawCoverFore(ctx, game, lane, time) {
     const map = game.map;
     const dep = LANE_DEPTH[lane];
+    const sel = this._ui && this._ui.selectedSquad;
     for (const c of game.covers[lane]) {
       if (!Camera.sees(c.x, c.w + 50)) continue;
       if (c.type === 'trench' || c.type === 'trenchlong') {
         this._trenchArt(ctx, map, lane, c, true);
+        /* A TRENCH CONCEALS WHAT IS IN IT.
+         *
+         * Men in a dug position are in shadow under the lip, and from any
+         * distance you see movement and a helmet rather than four riflemen.
+         * Drawing them at full clarity made every trench on the map read as an
+         * exhibit. So the interior takes a shadow veil that lifts when the
+         * player selects the squad holding it — pick them and they resolve,
+         * leave them and they sink back into the position.
+         *
+         * The veil is a gradient rather than a flat wash: densest just above
+         * the parapet where the body is, thinning toward the top so helmets and
+         * muzzle flashes still carry. You always know the trench is manned; you
+         * cannot count them until you look. */
+        const want = (sel && c.occ.indexOf(sel) >= 0) ? 0 : 1;
+        /* Eased per FRAME, not per second. Deriving a dt from the `time` the
+         * renderer is handed made this hostage to which clock the caller passes
+         * — the first version moved by one step per frame in the live loop and
+         * not at all in a paused capture. 0.18 is ~90% in twelve frames either
+         * way, which is what a reveal should feel like. */
+        c._veil = c._veil == null ? want : c._veil + (want - c._veil) * 0.18;
       } else if (c.type === 'rock') {
         /* THE SAME BOULDER AGAIN, clipped to its bottom.
          *
@@ -4757,7 +4798,24 @@ const Renderer = {
       if (vis <= 0.001 && u.deadT == null) continue;
       let scale = LANE_DEPTH[lane] * (u.sj || 1);
       const concealed = u.side === 'vc' && game.isConcealed(u);
-      const alpha = (concealed && u.side === game.player ? 0.55 : 1) * Math.min(1, vis);
+      /* A TRENCH HIDES WHO IS IN IT.
+       *
+       * Men in a dug position are under the lip and in shadow; at any distance
+       * you read movement and a helmet, not four riflemen. Drawn at full
+       * clarity every trench on the map was an exhibit. So occupants sink back
+       * until the player selects the squad holding the position, and resolve
+       * when they do — see `_veil` in _drawCoverFore, which owns the easing.
+       *
+       * The first version painted a shadow RECTANGLE over the trench interior
+       * and it read as exactly that: a grey box with four hard edges laid on
+       * the scene. Dimming the men themselves has no edges to give away.
+       *
+       * The dead are never hidden. A body does not keep its head down. */
+      const dug = u.deadT == null && u.squad && u.squad.inCover && u.squad.cover &&
+        (u.squad.cover.type === 'trench' || u.squad.cover.type === 'trenchlong');
+      const hide = dug ? (u.squad.cover._veil != null ? u.squad.cover._veil : 1) : 0;
+      const alpha = (concealed && u.side === game.player ? 0.55 : 1) *
+        Math.min(1, vis) * (1 - 0.6 * hide);
       // stance is decided by the squad-level state machine, nowhere else
       const pose = u.pose;
       // snipers on a tower platform stand above the ground line
