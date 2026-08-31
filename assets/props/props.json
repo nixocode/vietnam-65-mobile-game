@@ -181,6 +181,26 @@
    "aspect": 0.9818
   },
   {
+   "name": "rock_a",
+   "hM": 1.529,
+   "wM": 2.326,
+   "groundY": 403.7,
+   "ppm": 193.13,
+   "res": 512,
+   "realH": 1.15,
+   "aspect": 1.5213
+  },
+  {
+   "name": "rock_b",
+   "hM": 1.081,
+   "wM": 2.472,
+   "groundY": 354.2,
+   "ppm": 181.7,
+   "res": 512,
+   "realH": 0.8,
+   "aspect": 2.2868
+  },
+  {
    "name": "sandbag_wall",
    "hM": 1.194,
    "wM": 3.162,

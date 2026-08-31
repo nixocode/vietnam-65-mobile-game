@@ -382,6 +382,8 @@ const UI = {
   orderSel(order) {
     const g = this.game, s = this.selectedSquad;
     if (!s || !g) return;
+    // one key, both directions — the button reads out which one it will do
+    if (order === 'cover') order = (s.inCover || s.coverTarget) ? 'leavecover' : 'takecover';
     if (g.orderSquad(s, order)) Sound.click();
     else Sound.deny();
     this._refreshSquadPanel();
@@ -406,6 +408,15 @@ const UI = {
       html += `<button data-o="advance">ADVANCE <i>A</i></button>`;
       html += `<button data-o="hold">HOLD <i>H</i></button>`;
       html += `<button data-o="fallback">FALL BACK <i>B</i></button>`;
+      /* COVER, as an order.
+       *
+       * The whole cover system is a timing decision and player squads no longer
+       * seek cover on their own, so there has to be a one-press way to say "get
+       * in" and "get out". The button doubles as the state readout — it flips
+       * to LEAVE COVER, and carries the position's occupancy — because the
+       * player needs to know whether the hole they are about to send a second
+       * squad into has room. */
+      html += `<button data-o="cover" title="Take the nearest position, or break out of the one you are in (E)"><span class="sp-cov">COVER</span> <i>E</i></button>`;
       if (sd.grenades) html += `<button data-o="grenade"><span class="sp-cd"></span> <i>G</i></button>`;
       html += `<button data-o="smoke" title="Pop smoke (S)"><i>S</i></button>`;
       html += `<button data-o="focus" title="Concentrate fire on the nearest enemy squad (X)">FOCUS <i>X</i></button>`;
@@ -424,6 +435,18 @@ const UI = {
       const cd = Math.ceil(s.nadeCd || 0);
       nb.disabled = cd > 0;
       nb.querySelector('.sp-cd').textContent = cd ? `GRENADES ${cd}` : 'GRENADES';
+    }
+    const cb = el.querySelector('button[data-o="cover"]');
+    if (cb) {
+      const c = s.cover;
+      const inC = !!(s.inCover && c);
+      cb.classList.toggle('sp-danger', !!s.rangedIn);
+      let label;
+      if (s.rangedIn) label = 'RANGED — MOVE';
+      else if (inC) label = c.cap > 1 ? `LEAVE ${c.occ.length}/${c.cap}` : 'LEAVE COVER';
+      else if (s.order === 'tocover') label = 'MOVING…';
+      else label = 'TAKE COVER';
+      cb.querySelector('.sp-cov').textContent = label;
     }
     const sb = el.querySelector('button[data-o="suppress"]');
     if (sb) {
@@ -451,6 +474,7 @@ const UI = {
       if (up === 'A') { this.orderSel('advance'); return true; }
       if (up === 'H') { this.orderSel('hold'); return true; }
       if (up === 'B') { this.orderSel('fallback'); return true; }
+      if (up === 'E') { this.orderSel('cover'); return true; }
       if (up === 'G') { this.orderSel('grenade'); return true; }
       if (up === 'S') { this.orderSel('smoke'); return true; }
       /* SUPPRESS WAS UNREACHABLE FROM THE KEYBOARD.

@@ -26,6 +26,38 @@ const FLAG_DRAIN = 0.22;
 const MORALE_LOSS = { us: 0.24, vc: 0.15 }; // per CP of unit lost — US is casualty-sensitive
 const MAX_TRAPS = 10;
 
+/* ---------- cover: capacity, crowding, and time ----------
+ *
+ * Cover used to be a binary slot: one squad, one hole, a constant protection
+ * number for as long as you sat in it. That makes cover a place, not a
+ * decision — you either got there first or you did not, and nothing about
+ * WHEN you moved ever mattered.
+ *
+ * Three knobs turn it into a timing problem:
+ *
+ *   capacity   a trench holds two or three squads, a rock holds one. Massing
+ *              is possible, which means it can also be punished.
+ *   crowding   every squad past the first costs the whole position some
+ *              small-arms protection (men fight from the lip) AND multiplies
+ *              what one shell does to everyone in it. Massing wins the
+ *              firefight and loses to indirect fire. That trade is the system.
+ *   time       holding still improves the position (DIG) and simultaneously
+ *              lets the enemy range it in (RANGE). Being dug in and being
+ *              about to be shelled are the same clock.
+ *
+ * Every one of these resets the moment the squad moves, so the player is
+ * choosing when to break a good position rather than whether to have one. */
+const COVER = {
+  CROWD_LOSS:  0.17,   // small-arms protection each extra squad costs everyone
+  CROWD_BLAST: 0.55,   // extra blast damage per extra squad in the same hole
+  DIG_TIME:    13,     // seconds of holding still to fully improve a position
+  DIG_MAX:     0.15,   // protection a fully improved position adds
+  PROT_CAP:    0.82,
+  RANGE_TIME:  17,     // seconds in one spot before the enemy has it ranged
+  RANGE_WARN:  3.6,    // ranging round lands, then this long before fire-for-effect
+  RANGE_RATE:  4.4,    // seconds between rounds once they are on target
+};
+
 /* Squads a side may have in the field at once.
  *
  * The AI has always capped itself here (`_aiPickUnit` bailed above 7 squads).
@@ -430,6 +462,20 @@ class Game {
         if (p.kind === 'unit') this.addCover(p.lane, p.x * WORLD_W, 'trench', true);
       }
     }
+    /* Every map gets a dug line, not just the two firebases.
+     *
+     * Trenches were previously Khe Sanh and Hill 937 decoration attached to
+     * pre-placed defenders, so on three of five maps the crowd-vs-shell
+     * decision could never come up — there was nothing with capacity above one
+     * to crowd. Four per lane, spread across the contested middle, is enough
+     * that both sides always have a dug position to fight from and a choice
+     * about which one.
+     *
+     * The two nearest the centre are the LONG trenches (three squads): the
+     * middle of the map is where massing is tempting and where the shell that
+     * punishes it is most likely to arrive. */
+    this._genTrenches();
+
     // villages are fighting positions: low walls flank every settlement
     for (const s of (map.settlements || [])) {
       const cx = s.x * WORLD_W;
@@ -444,10 +490,88 @@ class Game {
         const nearFlag = Math.abs(x - this.flags[lane].x) < 70;
         const nearStruct = this.structures.some(st => st.lane === lane && Math.abs(st.x - x) < st.w);
         if (!nearFlag && !nearStruct) {
-          const t = rng() < 0.25 ? 'sandbag' : biomeType;
+          // rock is common on the highlands and the plateau, rare in the delta
+          const rockW = (map.id === 'hill937' || map.id === 'khesanh') ? 0.34
+                      : map.id === 'mekong' ? 0.08 : 0.18;
+          const r = rng();
+          const t = r < 0.22 ? 'sandbag' : r < 0.22 + rockW ? 'rock' : biomeType;
           this.addCover(lane, x, t, true);
         }
         x += 150 + rng() * 105;
+      }
+    }
+
+    this._genRocks();
+  }
+
+  /* Four dug positions per lane, and at least one that holds three squads.
+   *
+   * The first pass took a fixed list of spots and simply SKIPPED any that a
+   * settlement was standing on, then topped the count back up with plain short
+   * trenches. Measured on Ia Drang that produced eleven trenches and not one
+   * long trench on the whole map — so the crowd-three-squads decision, which is
+   * the centre of the system, could never come up. A blocked slot now slides
+   * along the lane instead of being abandoned, and a lane that still ends up
+   * without a long trench gets one forced in. */
+  _genTrenches() {
+    const rng = seeded(this.map.seed + 4271);
+    for (let lane = 0; lane < LANE_N; lane++) {
+      const want = [
+        { at: 0.255, type: 'trench' },
+        { at: 0.395, type: 'trenchlong' },
+        { at: 0.535, type: 'trench' },
+        { at: 0.675, type: 'trenchlong' },
+        { at: 0.815, type: 'trench' },
+      ];
+      let made = 0, longs = 0;
+      for (const w of want) {
+        for (let k = 0; k < 8; k++) {
+          // k=0 is the spot itself; after that, step outward in both directions
+          const off = k === 0 ? (rng() - 0.5) * 0.03
+                              : (k % 2 ? 1 : -1) * 0.028 * Math.ceil(k / 2);
+          const x = WORLD_W * (w.at + off);
+          if (!this._trenchSpotOk(lane, x)) continue;
+          if (this.addCover(lane, x, w.type, true, 96)) {
+            made++; if (w.type === 'trenchlong') longs++;
+            break;
+          }
+        }
+      }
+      let guard = 0;
+      while ((made < 4 || longs < 1) && guard++ < 60) {
+        const x = WORLD_W * (0.20 + rng() * 0.64);
+        if (!this._trenchSpotOk(lane, x)) continue;
+        const t = longs < 1 ? 'trenchlong' : 'trench';
+        if (this.addCover(lane, x, t, true, 96)) {
+          made++; if (t === 'trenchlong') longs++;
+        }
+      }
+    }
+  }
+
+  _trenchSpotOk(lane, x) {
+    if (x < 140 || x > WORLD_W - 140) return false;
+    return !this.structures.some(st =>
+      st.lane === lane && Math.abs(st.x - x) < st.w * 0.5 + 70);
+  }
+
+  /* Rocks, placed rather than left to the scatter.
+   *
+   * Cover types come out of one weighted roll in the scatter pass, and the
+   * wider spacing the long trench needs eats several of those rolls — the
+   * first build put exactly ONE rock on the whole of Ia Drang. Rock is the
+   * cover the player was promised, so it gets its own pass with a floor. */
+  _genRocks() {
+    const id = this.map.id;
+    const n = (id === 'hill937' || id === 'khesanh') ? 6 : id === 'mekong' ? 2 : 4;
+    const rng = seeded(this.map.seed + 8123);
+    for (let lane = 0; lane < LANE_N; lane++) {
+      let made = 0, guard = 0;
+      while (made < n && guard++ < 90) {
+        const x = WORLD_W * (0.14 + rng() * 0.74);
+        if (Math.abs(x - this.flags[lane].x) < 70) continue;
+        if (this.structures.some(st => st.lane === lane && Math.abs(st.x - x) < st.w)) continue;
+        if (this.addCover(lane, x, 'rock', true)) made++;
       }
     }
   }
@@ -455,10 +579,14 @@ class Game {
   addCover(lane, x, type, static_ = false, minGap) {
     const defs = {
       log:     { w: 34, prot: 0.4 },
+      // a boulder stops rounds outright but only shelters the men behind it
+      rock:    { w: 32, prot: 0.46 },
       sandbag: { w: 34, prot: 0.5 },
       dike:    { w: 38, prot: 0.45 },
       crater:  { w: 36, prot: 0.38 },
-      trench:  { w: 62, prot: 0.6 },
+      // the two positions worth crowding — everything else holds one squad
+      trench:  { w: 62,  prot: 0.6,  cap: 2 },
+      trenchlong: { w: 108, prot: 0.62, cap: 3 },
       rubble:  { w: 40, prot: 0.5 },
       wall:    { w: 36, prot: 0.5 },
       towerpos:{ w: 30, prot: 0.45, classReq: 'sniper' },
@@ -474,15 +602,70 @@ class Game {
     // together than the general 70px spacing rule allows — at that radius almost
     // every firing port was rejected and buildings had none.
     const gap = minGap != null ? minGap : 70;
-    if (lc.some(c => Math.abs(c.x - x) < gap)) return null;
+    // ...and never let two positions physically overlap, whatever the rule says.
+    // The long trench is 108px wide; the flat 70px spacing would have let a rock
+    // sit inside one.
+    if (lc.some(c => Math.abs(c.x - x) < Math.max(gap, (c.w + d.w) / 2 + 12))) return null;
     if (!static_ && lc.filter(c => c.dyn).length >= 8) return null;
     const spot = {
       lane, x, w: type === 'rubble' ? Math.max(40, d.w) : d.w, type, prot: d.prot,
-      occ: null, dyn: !static_, lift: 0,
+      occ: [], cap: d.cap || 1, dyn: !static_, lift: 0,
       classReq: d.classReq || null, sideReq: d.sideReq || null, conceals: !!d.conceals,
     };
     lc.push(spot);
     return spot;
+  }
+
+  /* Occupancy is a LIST, not a slot.
+   *
+   * Everything that used to read `c.occ === s` or `!c.occ` goes through these
+   * four, so capacity is enforced in exactly one place and a squad can never
+   * end up counted in two positions at once. */
+  coverHas(c, s) { return !!c && c.occ.indexOf(s) >= 0; }
+
+  coverRoom(c, s) {
+    if (!c) return false;
+    return c.occ.length < c.cap || c.occ.indexOf(s) >= 0;
+  }
+
+  coverJoin(c, s) {
+    if (!c) return false;
+    if (this.coverHas(c, s)) { s.cover = c; s.inCover = true; return true; }
+    if (c.occ.length >= c.cap) return false;
+    if (s.cover) this.coverLeave(s);
+    c.occ.push(s);
+    s.cover = c; s.inCover = true;
+    // a new hole is an unimproved hole, and nobody has ranged it yet
+    s.entrenchT = 0; s.rangedT = 0; s.rangedIn = false; s.rangedShots = 0;
+    if (c.occ.length === 1) Sound.shovel(c.x);
+    return true;
+  }
+
+  coverLeave(s) {
+    const c = s.cover;
+    if (c) {
+      const i = c.occ.indexOf(s);
+      if (i >= 0) c.occ.splice(i, 1);
+    }
+    s.cover = null; s.inCover = false;
+    s.entrenchT = 0; s.rangedT = 0; s.rangedIn = false; s.rangedShots = 0;
+  }
+
+  /* What a position is actually worth to THIS squad right now.
+   *
+   * Base type value, minus what the crowd costs, plus what the digging has
+   * bought. One function so the firefight, the blast maths and the HUD all
+   * quote the same number — a protection figure the player can see but that
+   * the bullets do not use would be worse than showing nothing. */
+  coverProt(c, s) {
+    if (!c) return 0;
+    let p = c.prot;
+    const n = c.occ.length;
+    if (n > 1) p *= 1 - COVER.CROWD_LOSS * (n - 1);
+    if (s && s.entrenchT > 0) {
+      p += COVER.DIG_MAX * Math.min(1, s.entrenchT / COVER.DIG_TIME);
+    }
+    return clamp(p, 0, COVER.PROT_CAP);
   }
 
   squadFitsCover(s, c) {
@@ -498,7 +681,7 @@ class Game {
     // backwards across open ground get killed, and it read as cowardly wandering.
     let best = null, bd = 1e9;
     for (const c of this.covers[squad.lane]) {
-      if (c.occ && c.occ !== squad) continue;
+      if (!this.coverRoom(c, squad)) continue;
       if (!this.squadFitsCover(squad, c)) continue;
       const dx = (c.x - squad.x) * squad.dir;
       if (dx < -28 || dx > maxDist) continue;
@@ -513,7 +696,7 @@ class Game {
       const s = this.squads[i];
       const alive = this.squadAlive(s);
       if (!alive.length) {
-        if (s.cover && s.cover.occ === s) s.cover.occ = null;
+        this.coverLeave(s);
         this.squads.splice(i, 1);
         continue;
       }
@@ -596,21 +779,33 @@ class Game {
         (alive.some(m => m.slowT > 0) ? 0.45 : 1);
       const xBefore = s.x;
 
+      /* Cover-seeking is the AI's, not the player's.
+       *
+       * The player asked for the cover system to be a decision they make, and a
+       * decision made for you is not one. Player squads under fire now stand in
+       * the open until they are TOLD to move — which is what makes the timing
+       * the skill. The AI keeps seeking, because an enemy that stands in the
+       * open while the player digs in is not a harder game, it is a broken one.
+       *
+       * Note the one thing player squads still do below: a squad on HOLD settles
+       * into a position it is ALREADY standing on. That is occupying ground the
+       * player chose, not walking off to find better. */
+      const autoSeek = s.side !== this.player;
       // Under effective fire: get into the nearest position forward. Never back.
-      if (s.order === 'advance' && s.underFireT > 0 && !s.inCover && !s.coverTarget) {
+      if (autoSeek && s.order === 'advance' && s.underFireT > 0 && !s.inCover && !s.coverTarget) {
         const c = this.freeCoverAhead(s, 150);
         if (c) { s.coverTarget = c; s.order = 'tocover'; }
       }
       // Bounding: troops moving up occupy the strongpoints they pass through
       // (trench, nest, tower, hide) instead of walking by them in the open.
       s.coverCd = Math.max(0, (s.coverCd || 0) - dt);
-      if (s.order === 'advance' && !s.inCover && !s.coverTarget && !s.playerHeld &&
+      if (autoSeek && s.order === 'advance' && !s.inCover && !s.coverTarget && !s.playerHeld &&
           s.coverCd <= 0) {
         const strong = { trench: 1, nestpos: 1, towerpos: 1, hide: 1, wall: 1,
                          rubble: 1, window: 1 };
         let pick = null, bd = 1e9;
         for (const c of this.covers[s.lane]) {
-          if (!strong[c.type] || (c.occ && c.occ !== s)) continue;
+          if (!strong[c.type] || !this.coverRoom(c, s)) continue;
           if (!this.squadFitsCover(s, c)) continue;
           const dx = (c.x - s.x) * s.dir;
           // Strictly AHEAD. A window starting behind the squad included the hole it
@@ -624,14 +819,21 @@ class Game {
       }
 
       if (s.order === 'tocover' && s.coverTarget) {
-        if (s.coverTarget.occ && s.coverTarget.occ !== s) {
-          s.coverTarget = null; s.order = 'advance';
+        if (!this.coverRoom(s.coverTarget, s)) {
+          // it filled up while we were crossing to it
+          s.coverTarget = null;
+          s.order = s.playerHeld ? 'hold' : 'advance';
+          if (s.playerHeld) { s.hold = true; s.holdX = s.x; }
         } else {
           const dx = s.coverTarget.x - s.x;
           if (Math.abs(dx) < 6) {
-            s.cover = s.coverTarget; s.coverTarget = null;
-            s.cover.occ = s; s.inCover = true; s.order = 'holdcover'; s.quietT = 0;
-            s.ceding = false;
+            const c = s.coverTarget; s.coverTarget = null;
+            if (this.coverJoin(c, s)) {
+              s.order = 'holdcover'; s.quietT = 0; s.ceding = false;
+            } else {
+              s.order = s.playerHeld ? 'hold' : 'advance';
+              if (s.playerHeld) { s.hold = true; s.holdX = s.x; }
+            }
           } else {
             // rush the hole — crawl if pinned, sprint otherwise
             s.x += Math.sign(dx) * Math.min(Math.abs(dx), sp * (s.pinned ? 0.35 : 1.15) * dt);
@@ -643,8 +845,8 @@ class Game {
         if (s.underFireT <= 0 && !engaged && !s.playerHeld) {
           s.quietT += dt;
           if (s.quietT > 2.6) {
-            if (s.cover) s.cover.occ = null;
-            s.cover = null; s.inCover = false; s.order = s.hold ? 'hold' : 'advance';
+            this.coverLeave(s);
+            s.order = s.hold ? 'hold' : 'advance';
             // do not let it dive straight back into the hole it just left
             s.coverCd = 3.5;
           }
@@ -661,8 +863,10 @@ class Game {
           s.x += s.dir * sp * dt;
         } else if (!s.inCover) {
           // settle into a dug position on our hold point if one exists
-          const c = this.covers[s.lane].find(c2 => !c2.occ && Math.abs(c2.x - s.holdX) < 50);
-          if (c) { c.occ = s; s.cover = c; s.inCover = true; }
+          const c = this.covers[s.lane].find(c2 =>
+            this.coverRoom(c2, s) && this.squadFitsCover(s, c2) &&
+            Math.abs(c2.x - s.holdX) < 50);
+          if (c) this.coverJoin(c, s);
         }
       } else if (s.order === 'advance') {
         // Bounding: nobody walks upright into a lane that is being swept. A
@@ -701,6 +905,7 @@ class Game {
         else if ((s.front - s.x) * s.dir > 16) s.x = s.front - s.dir * 16;
       }
       s._advancing = Math.abs(s.x - xBefore) > 0.01;
+      this._updateCoverClock(s, dt, Math.abs(s.x - xBefore) > 0.6);
 
       // stance state machine — ONE owner, with commitment so nobody yo-yos.
       // A man stays prone ≥2.4s and standing ≥1.1s before he may switch.
@@ -886,13 +1091,96 @@ class Game {
     }
   }
 
+  /* ---------- dug in, and then ranged in ----------
+   *
+   * One clock, two opposite consequences. While a squad holds a position it
+   * improves it — sandbags go up, the hole gets deeper, protection climbs
+   * toward DIG_MAX. At the same time, anyone watching them is walking rounds
+   * onto the spot. Past RANGE_TIME a ranging round lands short as a warning,
+   * and a few seconds later the position starts taking accurate fire.
+   *
+   * Both counters die the instant the squad moves, so the choice is never
+   * "should I use cover" (obviously yes) but "how long dare I stay" — which is
+   * the decision the whole system exists to create.
+   *
+   * The fire needs an observer. A squad dug in somewhere the enemy cannot see
+   * is not being ranged by anybody, and shelling it anyway would punish good
+   * positioning instead of rewarding it. */
+  _updateCoverClock(s, dt, moved) {
+    if (!s.inCover || moved) {
+      if (s.rangedIn && s.cover) this.emit(`FIRE BROKEN — LANE ${s.lane + 1}`, s.side);
+      s.entrenchT = 0; s.rangedT = 0; s.rangedIn = false;
+      s.rangedShots = 0; s.rangedFuse = 0;
+      return;
+    }
+    if (s.entrenchT < COVER.DIG_TIME) {
+      const was = s.entrenchT;
+      s.entrenchT = Math.min(COVER.DIG_TIME, s.entrenchT + dt);
+      if (was < COVER.DIG_TIME && s.entrenchT >= COVER.DIG_TIME) {
+        this.fx.floater(s.x, groundY(this.map, s.lane, s.x) - 34, 'DUG IN', '#b5c98f');
+      }
+    }
+    if (!this._coverObserved(s)) return;
+    s.rangedT += dt;
+
+    if (!s.rangedIn && s.rangedT >= COVER.RANGE_TIME) {
+      s.rangedIn = true;
+      s.rangedShots = 0;
+      s.rangedFuse = COVER.RANGE_WARN;
+      // the ranging round: lands short, hurts little, and is the player's cue
+      const c = s.cover;
+      const x = c.x - s.dir * (52 + rand(0, 26));
+      const y = groundY(this.map, s.lane, x);
+      Sound.shellWhistle(0);
+      this.fx.explosion(x, y, 34, { shake: 1.1 });
+      this.fx.addDecal(s.lane, x, 'crater', 10);
+      this.fx.floater(c.x, groundY(this.map, s.lane, c.x) - 40, 'RANGING ROUNDS', '#e08767');
+      this.emit(`POSITION RANGED — LANE ${s.lane + 1}`, s.side);
+      this._areaDamage(s.lane, x, 40, 8,
+        { side: this.foeOf(s.side) }, this.foeOf(s.side));
+      return;
+    }
+    if (!s.rangedIn) return;
+
+    s.rangedFuse -= dt;
+    if (s.rangedFuse > 0) return;
+    s.rangedFuse = COVER.RANGE_RATE + rand(-0.5, 0.9);
+    s.rangedShots = (s.rangedShots || 0) + 1;
+    const c = s.cover;
+    // rounds walk in: the first is loose, the rest are on the position
+    const spread = Math.max(6, 30 - 9 * s.rangedShots);
+    const x = c.x + rand(-spread, spread);
+    const y = groundY(this.map, s.lane, x);
+    const foe = this.foeOf(s.side);
+    Sound.shellWhistle(0);
+    Sound.explosion(0.7, x);
+    this.fx.explosion(x, y, 52, { shake: 1.8 });
+    this.fx.addDecal(s.lane, x, 'crater', 14);
+    /* 18, not 24. Measured against a 55 HP rifleman: one round on a lone dug-in
+     * squad takes 27% of each man, so ignoring the warning costs you people over
+     * four rounds rather than deleting the squad in three. Crowding still ends
+     * badly fast — three squads in one trench take 33 per man from the same
+     * round, which is the point. */
+    this._areaDamage(s.lane, x, 62, 18, { side: foe }, foe);
+  }
+
+  foeOf(side) { return side === 'us' ? 'vc' : 'us'; }
+
+  /* Is anyone in a position to call fire onto this squad? */
+  _coverObserved(s) {
+    const foe = this.foeOf(s.side);
+    for (const o of this.squads) {
+      if (o.side !== foe || o.lane !== s.lane) continue;
+      if (!this.squadAlive(o).length) continue;
+      if (Math.abs(this.squadAnchor(o) - s.x) < 900) return true;
+    }
+    return false;
+  }
+
   /* ---------- player/AI squad orders ---------- */
   orderSquad(s, order, arg) {
     if (!s || !this.squadAlive(s).length) return false;
-    const release = () => {
-      if (s.cover && s.cover.occ === s) s.cover.occ = null;
-      s.cover = null; s.inCover = false; s.coverTarget = null;
-    };
+    const release = () => { this.coverLeave(s); s.coverTarget = null; };
     if (order === 'advance') {
       release();
       s.ceding = false;
@@ -907,7 +1195,7 @@ class Game {
       // scramble back to the previous cover, or just give ground
       let best = null, bd = 1e9;
       for (const c of this.covers[s.lane]) {
-        if (c.occ && c.occ !== s) continue;
+        if (!this.coverRoom(c, s)) continue;
         const dx = (s.x - c.x) * s.dir; // behind us
         if (dx < 20 || dx > 420) continue;
         if (dx < bd) { bd = dx; best = c; }
@@ -920,10 +1208,41 @@ class Game {
       s.ceding = true;   // the player picked the spot, forward or back
       s.playerHeld = true;
       // snap to a free cover spot if the click is on one (and the class fits)
-      const c = this.covers[s.lane].find(c2 => (!c2.occ || c2.occ === s) &&
-        this.squadFitsCover(s, c2) && Math.abs(c2.x - arg) < c2.w);
+      const c = this.covers[s.lane].find(c2 => this.coverRoom(c2, s) &&
+        this.squadFitsCover(s, c2) &&
+        // a fingertip is wider than a rock: never demand better than 40px
+        Math.abs(c2.x - arg) < Math.max(c2.w, 40));
       if (c) { s.coverTarget = c; s.order = 'tocover'; }
       else { s.moveToX = clamp(arg, 30, WORLD_W - 30); s.order = 'moveto'; }
+    } else if (order === 'takecover') {
+      /* TAKE COVER: the nearest position this squad can actually use.
+       *
+       * `freeCoverAhead` only looks forward, which is right for an advance
+       * under fire but wrong for an order — the player pointing at cover means
+       * "get in something now", and the best hole is often the one just behind.
+       * So this searches both ways, forward-weighted. */
+      let best = null, bd = 1e9;
+      for (const c of this.covers[s.lane]) {
+        if (!this.coverRoom(c, s) || !this.squadFitsCover(s, c)) continue;
+        const dx = (c.x - s.x) * s.dir;
+        const d = dx >= 0 ? dx : -dx * 1.8;   // forward is cheaper, not free
+        if (Math.abs(dx) > 420 || d >= bd) continue;
+        bd = d; best = c;
+      }
+      if (!best) return false;
+      s.ceding = false; s.playerHeld = true;
+      if (this.coverHas(best, s)) { s.order = 'holdcover'; return true; }
+      release();
+      s.coverTarget = best; s.order = 'tocover'; s.coverCd = 0;
+      return true;
+    } else if (order === 'leavecover') {
+      if (!s.inCover && !s.coverTarget) return false;
+      release();
+      s.order = s.hold ? 'hold' : 'advance';
+      s.holdX = s.x;
+      // do not let it slide straight back into the hole it was just pulled from
+      s.coverCd = 2.5;
+      return true;
     } else if (order === 'grenade') {
       return this._squadGrenade(s);
     } else if (order === 'focus') {
@@ -963,8 +1282,7 @@ class Game {
     if (!men.length || (s.crossT || 0) > 0) return false;
     const to = s.lane === 0 ? 1 : 0;
     // release cover: it belongs to the lane being left
-    if (s.cover && s.cover.occ === s) s.cover.occ = null;
-    s.cover = null; s.inCover = false; s.coverTarget = null;
+    this.coverLeave(s); s.coverTarget = null;
     s.crossFrom = s.lane;
     s.crossT = CROSS_TIME;
     s.lane = to;
@@ -1481,7 +1799,7 @@ class Game {
      * hard to shift at distance while letting a close assault break the position,
      * which is how the fight is supposed to resolve. */
     let rawProt = (!t.isHole && t.squad && t.squad.inCover && t.squad.cover)
-      ? t.squad.cover.prot : 0;
+      ? this.coverProt(t.squad.cover, t.squad) : 0;
     if (rawProt && typeof Perks !== 'undefined' && Perks.on(this, t.side, 'entrench')) {
       rawProt = Math.min(0.82, rawProt * 1.28);
     }
@@ -1868,8 +2186,19 @@ class Game {
       const prone = u.pose === 'prone';
       const want = prone ? 52 : 38;
       const floor = prone ? 40 : 28;   // a prone man is ~55px long, not ~26
-      const spread = Math.max(floor, Math.min(want, s.cover.w / Math.max(2, alive.length)));
-      tx = s.cover.x - s.dir * (idx - (alive.length - 1) / 2) * spread;
+      /* Each squad gets its own stretch of the position.
+       *
+       * Cover holds up to three squads now, and every one of them centred on
+       * `cover.x` — so two squads sharing a trench drew as one squad with
+       * double-thick men. Crowding you cannot see is not a decision you can
+       * time. They still overlap at three, because three squads in one trench
+       * ARE overlapping; what matters is that you can tell there are three. */
+      const oc = s.cover.occ.length || 1;
+      const oi = Math.max(0, s.cover.occ.indexOf(s));
+      const share = s.cover.w / oc;
+      const centre = s.cover.x + (oi - (oc - 1) / 2) * share;
+      const spread = Math.max(floor, Math.min(want, share / Math.max(2, alive.length)));
+      tx = centre - s.dir * (idx - (alive.length - 1) / 2) * spread;
     } else {
       /* 34 was not enough room. A man is 84px tall and his levelled rifle is
        * about 40px wide on its own, so at 34px spacing every soldier overlapped
@@ -2157,7 +2486,15 @@ class Game {
       if (dist > r) continue;
       let k = 1 - 0.6 * (dist / r);
       // cover helps a little against blast — most of its value is vs small arms
-      if (u.squad && u.squad.inCover && u.squad.cover) k *= 1 - u.squad.cover.prot * 0.3;
+      if (u.squad && u.squad.inCover && u.squad.cover) {
+        const c = u.squad.cover;
+        k *= 1 - this.coverProt(c, u.squad) * 0.3;
+        /* And this is the other half of the crowding bargain. Two squads packed
+         * into one trench are hard to shift with rifles and catastrophic to
+         * catch with a single shell — which is exactly the choice the player is
+         * being asked to time. */
+        if (c.occ.length > 1) k *= 1 + COVER.CROWD_BLAST * (c.occ.length - 1);
+      }
       // blast is `heavy`: armour is no defence against a satchel, mine or shell
       this._damage(u, dmg * k, { side: killerSide }, { gib: dmg * k >= 30, heavy: true });
       if (u.deadT == null) u.suppressT = Math.max(u.suppressT, 1);
@@ -2246,9 +2583,9 @@ class Game {
         const ci = laneCovers.findIndex(c => c.structRef === st);
         if (ci >= 0) {
           const c = laneCovers[ci];
-          if (c.occ) {
-            const s = c.occ;
-            s.cover = null; s.inCover = false; s.order = 'advance';
+          for (const s of c.occ.slice()) {
+            this.coverLeave(s);
+            s.order = 'advance';
             s.pin += 0.5; s.underFireT = 2;
           }
           laneCovers.splice(ci, 1);

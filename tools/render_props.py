@@ -1050,6 +1050,103 @@ def build_cartviet():
     _box(wood, -1.30, -0.20, 0.42, -1.24, 0.20, 0.47)          # yoke bar
 
 
+
+# ---- rock: the one piece of cover that is neither dug nor built -----------
+# Boulders are the wrong shape for the box kit that builds the huts and the
+# tower — a boulder has no straight edge anywhere on it, and made of boxes it
+# reads as a crate. These come off a subdivided icosphere with the vertices
+# pushed around and FLAT shading kept, so the result is faceted granite: the
+# facets catch the same key light the soldiers do, which is what makes a rock
+# sit in the scene instead of floating on it.
+#
+# Two variants because a single repeated silhouette on a hillside is the most
+# obvious tell a game has one rock: `rock_a` is a single shouldered boulder to
+# crouch behind, `rock_b` a weathered cluster.
+
+def _boulder(mat, cx, cz, rx, ry, rz, seed, rough=0.30, subdiv=2):
+    import bmesh
+    import random as _r
+    import mathutils
+    _r.seed(seed)
+    me = bpy.data.meshes.new('rock')
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=subdiv, radius=1.0)
+    for v in bm.verts:
+        # push each vertex along its own normal — a boulder is a sphere that
+        # has been knocked about, not a noisy blob
+        n = v.co.normalized()
+        k = 1.0 + (_r.random() - 0.5) * rough
+        v.co = n * k
+    # flatten the base so it sits ON the ground rather than half-buried or
+    # balanced on a point
+    for v in bm.verts:
+        if v.co.z < -0.62:
+            v.co.z = -0.62
+    bm.to_mesh(me)
+    bm.free()
+    for poly in me.polygons:
+        poly.use_smooth = False
+    ob = bpy.data.objects.new('rock', me)
+    bpy.context.collection.objects.link(ob)
+    ob.scale = (rx, ry, rz)
+    ob.location = (cx, 0.0, cz)
+    ob.rotation_euler = (0, _r.random() * 0.5 - 0.25, _r.random() * 3.14)
+    ob.data.materials.append(mat)
+    return ob
+
+
+def build_rock_a():
+    """One shouldered boulder, chest high — cover for a single squad.
+
+    Granite in the highlands weathers grey-brown with a warm lichen bloom on the
+    lit face, so the body is cool and a second, warmer material is used for the
+    smaller shoulder pieces. Two tones stop it reading as a flat grey lump at
+    the size it is actually drawn (about 50 px tall).
+    """
+    stone = _pmat('rk_stone', (0.098, 0.094, 0.082), rough=0.95)
+    warm = _pmat('rk_warm', (0.126, 0.112, 0.084), rough=0.92)
+    dark = _pmat('rk_dark', (0.062, 0.060, 0.054), rough=0.97)
+    # Proportion matters more than detail here: the first pass came out 2.5 m
+    # wide and 1.3 m tall, which at cover size reads as a slab of pavement. A
+    # boulder a man crouches behind is roughly as tall as it is wide.
+    _boulder(stone, 0.0, 0.50, 0.70, 0.55, 0.86, 11, rough=0.34)
+    # a shoulder leaning on the main mass, which is what gives the silhouette
+    # its break instead of one clean dome
+    _boulder(warm, -0.62, 0.26, 0.40, 0.38, 0.42, 23, rough=0.42)
+    _boulder(dark, 0.60, 0.20, 0.32, 0.32, 0.30, 37, rough=0.46)
+    # rubble at the foot, so it meets the ground in a scatter not a seam
+    import random as _r
+    _r.seed(71)
+    for i in range(5):
+        x = -0.85 + _r.random() * 1.70
+        r = 0.07 + _r.random() * 0.09
+        _boulder(dark if i % 2 else stone, x, r * 0.6, r * 1.5, r, r,
+                 90 + i, rough=0.55, subdiv=1)
+
+
+def build_rock_b():
+    """A weathered cluster — three stones slumped together, lower and wider.
+
+    The pair exists so a hillside can be dressed without the same silhouette
+    repeating. This one is knee-to-waist height: it reads as ground a man goes
+    prone behind rather than stands behind, which is the other posture the cover
+    system asks for.
+    """
+    stone = _pmat('rk_stone', (0.098, 0.094, 0.082), rough=0.95)
+    warm = _pmat('rk_warm', (0.126, 0.112, 0.084), rough=0.92)
+    dark = _pmat('rk_dark', (0.062, 0.060, 0.054), rough=0.97)
+    _boulder(stone, -0.42, 0.40, 0.66, 0.50, 0.44, 5, rough=0.40)
+    _boulder(warm, 0.46, 0.48, 0.60, 0.46, 0.52, 17, rough=0.36)
+    _boulder(dark, 0.06, 0.24, 0.42, 0.38, 0.28, 29, rough=0.50)
+    import random as _r
+    _r.seed(83)
+    for i in range(6):
+        x = -0.9 + _r.random() * 1.8
+        r = 0.06 + _r.random() * 0.10
+        _boulder(dark if i % 2 else warm, x, r * 0.6, r * 1.6, r, r,
+                 130 + i, rough=0.55, subdiv=1)
+
+
 BUILT = {
     'm113':       (build_m113, 2.6),
     'huey':       (build_huey, 4.4),   # UH-1 rotor diameter aside, 4.4 m to the hub
@@ -1068,6 +1165,8 @@ BUILT = {
     'vine_a':     (build_vine, 1.30),
     # cover — the last of the inked kit to be replaced
     'dike_a':      (build_dike, 0.62),
+    'rock_a':      (build_rock_a, 1.15),   # chest-high: stand-behind cover
+    'rock_b':      (build_rock_b, 0.80),   # knee-high cluster: go-prone cover
     'stonewall_a': (build_stonewall, 1.05),
     # village fittings, replacing donor props from a fantasy pack
     'shrine_a':    (build_shrine, 1.5),

@@ -3315,6 +3315,7 @@ const Renderer = {
       this._drawEmplacements(ctx, game, lane, time);
       this._drawFlag(ctx, game, lane, time);
       this._drawUnits(ctx, game, lane, time);
+      this._drawCoverFore(ctx, game, lane, time);
       this._drawNades(ctx, game, lane);
       this._drawSquadMarkers(ctx, game, lane, time);
       this._drawRank(ctx, game, lane);
@@ -3501,11 +3502,54 @@ const Renderer = {
         ctx.fillStyle = 'rgba(38,29,18,0.95)';
         ctx.fillRect(c.x - w / 2 - 1.5 * depth, y - 10 * depth, w + 3 * depth, 2.6 * depth);
         ctx.fillRect(c.x - w / 2 - 1.5 * depth, y - h - 12 * depth, w + 3 * depth, 2.2 * depth);
-        if (c.occ) {
+        if (c.occ.length) {
           // muzzle-lit interior while the position is manned
           ctx.fillStyle = 'rgba(255,190,110,0.10)';
           ctx.fillRect(c.x - w / 2, y - h - 10 * depth, w, h);
         }
+        ctx.restore();
+        continue;
+      }
+      if (c.type === 'trench' || c.type === 'trenchlong') {
+        // back half only — the near parapet is drawn over the men, see
+        // _drawCoverFore. Runs before the translate/scale the rest of the
+        // switch works in, because it needs world-space groundY.
+        this._trenchArt(ctx, map, lane, c, false);
+        continue;
+      }
+      if (c.type === 'rock') {
+        /* Boulders. The only cover in the set that is neither dug nor built,
+         * and the only one that stops a round outright — so it is drawn solid
+         * and opaque, with a contact shadow rather than a dug lip. */
+        const y = groundY(map, lane, c.x);
+        ctx.save();
+        ctx.translate(c.x, y);
+        ctx.scale(depth, depth);
+        ctx.fillStyle = 'rgba(14,12,9,0.42)';
+        ctx.beginPath(); ctx.ellipse(0, 0, c.w / 2 + 4, 4, 0, 0, 7); ctx.fill();
+        const rn = (Math.floor(c.x / 43) % 2) ? 'rock_b' : 'rock_a';
+        if (typeof Props !== 'undefined' && Props.ready && Props.has(rn) &&
+            Props.draw(ctx, rn, 0, 0, 1, { flip: (Math.floor(c.x / 61) % 2) === 1 })) {
+          ctx.restore();
+          continue;
+        }
+        // fallback: a faceted lump, same silhouette language as the prop
+        const rngR = seeded((map.seed + Math.floor(c.x) * 17) >>> 0);
+        const hR = 15 + rngR() * 5;
+        ctx.fillStyle = '#6f6a5e';
+        ctx.beginPath();
+        ctx.moveTo(-c.w / 2, 0);
+        ctx.lineTo(-c.w * 0.36, -hR * 0.72);
+        ctx.lineTo(-c.w * 0.10, -hR);
+        ctx.lineTo(c.w * 0.24, -hR * 0.86);
+        ctx.lineTo(c.w / 2, 0);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(0,0,0,0.20)';
+        ctx.beginPath();
+        ctx.moveTo(c.w * 0.24, -hR * 0.86);
+        ctx.lineTo(c.w / 2, 0);
+        ctx.lineTo(c.w * 0.06, 0);
+        ctx.closePath(); ctx.fill();
         ctx.restore();
         continue;
       }
@@ -3611,7 +3655,8 @@ const Renderer = {
           ctx.beginPath(); ctx.ellipse(rng() * c.w - c.w / 2, -8, 3, 1.6, 0, Math.PI, 0); ctx.fill();
         }
       } else if (c.type === 'trench') {
-        // dug slot with a parapet toward the enemy side
+        // unreachable: trenches are drawn in world space above. Kept as the
+        // fallback if that branch is ever gated off.
         ctx.fillStyle = 'rgba(14,11,7,0.85)';
         ctx.beginPath(); ctx.ellipse(0, 0, c.w / 2, 5, 0, 0, 7); ctx.fill();
         ctx.fillStyle = '#5c4a2e';
@@ -3621,6 +3666,213 @@ const Renderer = {
         ctx.beginPath(); ctx.moveTo(-c.w / 2, -0.5); ctx.lineTo(c.w / 2, -0.5); ctx.stroke();
       }
       ctx.restore();
+    }
+  },
+
+  /* A TRENCH IS A THING YOU STAND IN.
+   *
+   * The first version reused `_trenchLine`, the Khe Sanh firebase decoration.
+   * Captured at 1:1 it read as a flat tan plank floating over a black bar —
+   * which is what that art is: a flat-topped rectangle with a hard edge and a
+   * dark slot under it. Across a 330px firebase perimeter the sine wobble
+   * carries it. Across a 62px cover it is one straight section, and the eye
+   * reads a plank.
+   *
+   * The thing that actually makes a trench read is not the parapet, it is the
+   * OCCLUSION: men in a trench are cut off at the shins by the near lip. Cover
+   * is drawn before the units, so nothing was ever in front of them. So the
+   * position is drawn twice — spoil and slot behind the men, near parapet over
+   * them — and the men are standing IN it rather than on it.
+   */
+  _trenchArt(ctx, map, lane, c, fore) {
+    const dep = LANE_DEPTH[lane];
+    const p = map.pal;
+    /* The ART is wider than the COVER. A 34px-tall bank tapering inside a
+     * 108px span has nowhere to put its ends, and they came out as near
+     * vertical faces with a hard corner. Twenty-two pixels of run either side
+     * gives the taper room; the cover's own width, which is what the sim uses
+     * for occupancy and targeting, is untouched. */
+    const pad = 22 * LANE_DEPTH[lane];
+    const x0 = c.x - c.w / 2 - pad, x1 = c.x + c.w / 2 + pad;
+    const rng = seeded((map.seed + Math.floor(c.x) * 31) >>> 0);
+    const cols = [];
+    for (let x = x0; x <= x1 + 0.01; x += 5) cols.push(x);
+    cols.push(x1);
+    const gy = x => groundY(map, lane, x);
+    // one jitter table per position, so the lumps do not crawl between frames
+    const jit = cols.map(() => rng());
+
+    /* EARTH COLOURS, not palette colours.
+     *
+     * The first version tinted `pal.laneTop` upward, on the reasoning that
+     * fresh spoil is lighter than turf. Captured at 3x it came out a bright
+     * cream slab on olive ground — `laneTop` is the top of the ground GRADIENT,
+     * not the colour the ground actually renders at, so tinting it lighter put
+     * the parapet a long way off the scene. These are the browns the crater and
+     * the old trench mounds already use in this same pass, which are known to
+     * sit correctly. */
+    const EARTH = '#5c4a2e', EARTH_LIP = '#6b5636';
+    /* WHERE THE MEN ACTUALLY ARE.
+     *
+     * `groundY` is not the plane a soldier stands on. Measured by rendering a
+     * lone rifleman twice and diffing the column: with groundY at 508 his
+     * sprite spans 466..552, so his BOOTS are 44px BELOW the line every piece
+     * of cover art is anchored to, and his hips are on it. The existing kit
+     * gets away with it — a sandbag wall spans -52..+15 and leaves the boots
+     * showing, and at chest height nobody reads that as wrong.
+     *
+     * A trench cannot get away with it. A parapet that stops at +6 leaves 38px
+     * of shin and boot hanging below the bank, which is precisely the "standing
+     * on it, not in it" look this pass exists to fix. So the near bank runs
+     * down to the boot line. */
+    const BOOT = 34 * dep;
+
+    if (!fore) {
+      const spoil = EARTH;
+      const taperAt = x => Math.sin(Math.PI *
+        Math.min(1, Math.max(0, (x - x0) / Math.max(1, x1 - x0))));
+      const farTop = (x, i) => gy(x) - (9 + 10 * taperAt(x) + jit[i] * 3) * dep;
+      ctx.beginPath();
+      ctx.moveTo(x0 - 3 * dep, gy(x0) + 2 * dep);
+      cols.forEach((x, i) => ctx.lineTo(x, farTop(x, i)));
+      ctx.lineTo(x1 + 3 * dep, gy(x1) + 2 * dep);
+      ctx.closePath();
+      ctx.fillStyle = spoil; ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      ctx.beginPath();
+      ctx.moveTo(x0 - 3 * dep, gy(x0) + 2 * dep);
+      cols.forEach((x, i) => ctx.lineTo(x, farTop(x, i) + 3 * dep));
+      ctx.lineTo(x1 + 3 * dep, gy(x1) + 2 * dep);
+      ctx.closePath(); ctx.fill();
+
+      /* THE SLOT. Rounded at both ends — a dug trench ramps in, it does not
+       * stop at a vertical wall, and square ends were most of why the old art
+       * read as a printed rectangle. */
+      // sits in the band between the far bank's foot and the near bank's crest,
+      // which is the only strip of the hole the near parapet does not cover
+      const d0 = 7 * dep, d1 = -3 * dep;
+      ctx.beginPath();
+      ctx.moveTo(x0, gy(x0) - d0);
+      cols.forEach(x => ctx.lineTo(x, gy(x) - d0));
+      ctx.quadraticCurveTo(x1 + 5 * dep, gy(x1) + (d1 - d0) * 0.4, x1 - 4 * dep, gy(x1) + d1);
+      for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i], gy(cols[i]) + d1);
+      ctx.quadraticCurveTo(x0 - 5 * dep, gy(x0) + (d1 - d0) * 0.4, x0, gy(x0) - d0);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(11,9,6,0.90)'; ctx.fill();
+      // a sliver of lit back wall, so the hole has depth instead of being ink
+      ctx.strokeStyle = '#4a3a24';
+      ctx.lineWidth = 1.6 * dep;
+      ctx.beginPath();
+      cols.forEach((x, i) => (i ? ctx.lineTo(x, gy(x) - d0 + 1.4 * dep)
+                                : ctx.moveTo(x, gy(x) - d0 + 1.4 * dep)));
+      ctx.stroke();
+      return;
+    }
+
+    /* NEAR PARAPET, over the men.
+     *
+     * TAPERED, not a slab. The first version ran a constant height across the
+     * span and closed with straight diagonals to the ground, which draws a
+     * trapezoid — and a flat-topped trapezoid in front of a soldier reads as a
+     * table he is standing behind. The height is now a sine bell across the
+     * span, so the bank rises out of the ground and settles back into it, and
+     * the lumps ride on top of that rather than on a flat line.
+     *
+     * 12px, not 19. At 19 the crest sat across the men's chests: correct for a
+     * real trench, unreadable in a game where you need to see who is in it. */
+    const bell = x => Math.pow(Math.sin(Math.PI *
+      Math.min(1, Math.max(0, (x - x0) / Math.max(1, x1 - x0)))), 0.55);
+    const top = (x, i) =>
+      gy(x) - (11 * bell(x) + Math.sin((x - x0) * 0.16) * 1.6 + jit[i] * 2) * dep;
+    /* The FOOT tapers too. With a flat bottom the polygon closed with a vertical
+     * drop of 34px at each end — a sheer cut through the earth, which is what
+     * made the first tapered version still read as a slab dropped on the
+     * ground. Both edges converge, so the bank fades out at its ends the way
+     * spoil actually lies. */
+    const foot = x => gy(x) + BOOT * Math.pow(bell(x), 0.8);
+    const band = (fill, lift) => {
+      ctx.beginPath();
+      cols.forEach((x, i) => (i ? ctx.lineTo(x, top(x, i) + lift)
+                                : ctx.moveTo(x, top(x, i) + lift)));
+      for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i], foot(cols[i]));
+      ctx.closePath();
+      ctx.fillStyle = fill; ctx.fill();
+    };
+    band(EARTH_LIP, 0);
+    band('rgba(255,244,214,0.10)', 0);          // light catching the crest
+    band(EARTH_LIP, 2.6 * dep);                 // ...only the top 2.6px of it
+    // the bank falls away into shadow toward the camera
+    ctx.fillStyle = 'rgba(0,0,0,0.26)';
+    ctx.beginPath();
+    cols.forEach((x, i) => (i ? ctx.lineTo(x, gy(x) + BOOT * 0.42)
+                              : ctx.moveTo(x, gy(x) + BOOT * 0.42)));
+    for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i], foot(cols[i]));
+    ctx.closePath(); ctx.fill();
+    // sandbags revetting the lip — two or three, not a neat row
+    if (typeof Props !== 'undefined' && Props.ready && Props.has('sandbags_row')) {
+      const n = c.w > 80 ? 3 : 2;
+      for (let i = 0; i < n; i++) {
+        // spaced across the COVER, not the padded art span
+        const x = c.x - c.w / 2 + c.w * ((i + 0.5) / n) + (jit[i] - 0.5) * 10;
+        Props.draw(ctx, 'sandbags_row', x, top(x, i) + 3 * dep, 1,
+                   { flip: jit[i] < 0.5, fit: 10 * dep });
+      }
+    }
+  },
+
+  /* Cover drawn IN FRONT of the men. See _trenchArt for why this pass exists:
+   * a position you can see straight through is a position you are standing on.
+   * Only trenches and rocks qualify — the rest of the kit is chest-height or
+   * lower and correctly sits behind. */
+  _drawCoverFore(ctx, game, lane, time) {
+    const map = game.map;
+    const dep = LANE_DEPTH[lane];
+    for (const c of game.covers[lane]) {
+      if (!Camera.sees(c.x, c.w + 50)) continue;
+      if (c.type === 'trench' || c.type === 'trenchlong') {
+        this._trenchArt(ctx, map, lane, c, true);
+      } else if (c.type === 'rock') {
+        /* THE SAME BOULDER AGAIN, clipped to its bottom.
+         *
+         * The first attempt drew a separate little procedural stone in front of
+         * the men. It read as a gravestone: a second object, a different grey,
+         * standing beside the rock rather than being it. Redrawing the actual
+         * prop through a clip rect that only lets the lower band through means
+         * what appears in front of the soldier IS the rock he is behind — same
+         * silhouette, same tone, no seam. */
+        const y = groundY(map, lane, c.x);
+        const rn = (Math.floor(c.x / 43) % 2) ? 'rock_b' : 'rock_a';
+        if (!(typeof Props !== 'undefined' && Props.ready && Props.has(rn))) continue;
+        /* Pushed DOWN as well as clipped. The prop plants its own base on the
+         * ground line, so there is no rock geometry below it — and the men's
+         * boots are 44px below that line (see _trenchArt). Drawing the boulder
+         * again 26px lower and showing only the band across the legs puts real
+         * rock in front of them; the clip hides the fact that its top is in the
+         * wrong place. */
+        ctx.save();
+        /* Clipped to a STONE-SHAPED window, not a rectangle. A rect clip cut the
+         * boulder into a band with a dead-straight top and bottom, which read as
+         * a stack of grey boxes rather than rock. */
+        const rx0 = c.x - c.w * 0.66, rx1 = c.x + c.w * 0.66;
+        ctx.beginPath();
+        for (let k = 0; k <= 14; k++) {
+          const t = k / 14, x = rx0 + (rx1 - rx0) * t;
+          const dome = Math.pow(Math.sin(Math.PI * t), 0.45);
+          const yy = y - (11 * dome) * dep;
+          k ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy);
+        }
+        for (let k = 14; k >= 0; k--) {
+          const t = k / 14, x = rx0 + (rx1 - rx0) * t;
+          const dome = Math.min(1, Math.pow(Math.sin(Math.PI * t), 0.34) * 1.5);
+          ctx.lineTo(x, y + 34 * dep * dome);
+        }
+        ctx.closePath();
+        ctx.clip();
+        ctx.translate(c.x, y + 26 * dep);
+        ctx.scale(dep, dep);
+        Props.draw(ctx, rn, 0, 0, 1, { flip: (Math.floor(c.x / 61) % 2) === 1 });
+        ctx.restore();
+      }
     }
   },
 
@@ -3843,9 +4095,47 @@ const Renderer = {
     }
   },
 
+  /* The two halves of the cover clock, drawn where the decision is made.
+   *
+   * A bar over the position while it is being improved, and a hard pulsing
+   * warning once the enemy has ranged it. The warning is deliberately loud and
+   * deliberately NOT limited to the selected squad: it is the cue to move, and
+   * a cue you only see when you happen to have that squad selected is not a
+   * cue. */
+  _drawCoverClock(ctx, game, lane, time) {
+    for (const s of game.squads) {
+      if (s.lane !== lane || s.side !== game.player || !s.inCover || !s.cover) continue;
+      if (!Camera.sees(s.x, 60)) continue;
+      const c = s.cover;
+      const y = groundY(game.map, lane, c.x) - 40;
+      if (s.rangedIn) {
+        const p = 0.5 + 0.5 * Math.sin(time * 9);
+        ctx.save();
+        ctx.strokeStyle = `rgba(224,135,103,${0.45 + 0.5 * p})`;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(c.x - 7, y - 8); ctx.lineTo(c.x, y - 20); ctx.lineTo(c.x + 7, y - 8);
+        ctx.closePath(); ctx.stroke();
+        ctx.fillStyle = `rgba(224,135,103,${0.55 + 0.4 * p})`;
+        ctx.fillRect(c.x - 0.9, y - 16, 1.8, 5);
+        ctx.fillRect(c.x - 0.9, y - 10, 1.8, 1.8);
+        ctx.restore();
+      } else if (s.entrenchT > 0.2) {
+        const k = Math.min(1, s.entrenchT / COVER.DIG_TIME);
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fillRect(c.x - 11, y, 22, 2.6);
+        ctx.fillStyle = k >= 1 ? 'rgba(181,201,143,0.9)' : 'rgba(181,201,143,0.55)';
+        ctx.fillRect(c.x - 11, y, 22 * k, 2.6);
+        ctx.restore();
+      }
+    }
+  },
+
   _drawSquadMarkers(ctx, game, lane, time) {
     const ui = this._ui;
     const sel = ui && ui.selectedSquad;
+    this._drawCoverClock(ctx, game, lane, time);
     // selected squad: rings under the men, free cover spots hinted downfield
     if (sel && sel.lane === lane && game.squadAlive(sel).length) {
       ctx.save();
@@ -3856,18 +4146,46 @@ const Renderer = {
         ctx.ellipse(m.x, m.y + 2, 9, 3.2, 0, 0, 7);
         ctx.stroke();
       }
+      /* COVER, READ AT A GLANCE.
+       *
+       * The player is being asked to time when to move between positions and
+       * whether to crowd one. Neither is a decision they can make from a
+       * dashed ellipse that means "empty" — they need to see how much room is
+       * left, and which positions are worth crossing to. So each candidate
+       * carries capacity pips: filled for occupied, hollow for free, and the
+       * whole marker greys out when it is full.
+       *
+       * Drawn only for the selected squad's own lane, because a cover marker
+       * in the lane you are not commanding is noise. */
       const pulse = 0.35 + 0.2 * Math.sin(time * 5);
       for (const c of game.covers[lane]) {
-        if (c.occ && c.occ !== sel) continue;
         if (!Camera.sees(c.x, 40)) continue;
+        if (c.type === 'window' && c.structRef && c.structRef.state === 2) continue;
+        const fits = game.squadFitsCover(sel, c);
+        const room = game.coverRoom(c, sel);
+        const mine = game.coverHas(c, sel);
         const cy = groundY(game.map, lane, c.x);
-        ctx.strokeStyle = `rgba(180,220,150,${pulse})`;
-        ctx.setLineDash([3, 4]);
-        ctx.lineWidth = 1.2;
+        const col = !fits || !room ? `rgba(150,150,150,${pulse * 0.55})`
+                  : mine ? `rgba(255,217,138,${0.55 + 0.2 * Math.sin(time * 5)})`
+                  : `rgba(180,220,150,${pulse})`;
+        ctx.strokeStyle = col;
+        ctx.setLineDash(mine ? [] : [3, 4]);
+        ctx.lineWidth = mine ? 1.6 : 1.2;
         ctx.beginPath();
         ctx.ellipse(c.x, cy + 1, c.w / 2 + 4, 4, 0, 0, 7);
         ctx.stroke();
         ctx.setLineDash([]);
+        // capacity pips — only where capacity is actually a choice
+        if (c.cap > 1) {
+          const n = c.occ.length;
+          const gap = 6, x0 = c.x - (c.cap - 1) * gap / 2;
+          for (let i = 0; i < c.cap; i++) {
+            ctx.beginPath();
+            ctx.arc(x0 + i * gap, cy + 9, 2.1, 0, 7);
+            if (i < n) { ctx.fillStyle = col; ctx.fill(); }
+            else { ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.stroke(); }
+          }
+        }
       }
       if (sel.order === 'moveto') {
         const my = groundY(game.map, lane, sel.moveToX);
