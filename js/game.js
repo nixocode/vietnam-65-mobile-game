@@ -648,7 +648,6 @@ class Game {
     s.cover = c; s.inCover = true;
     // a new hole is an unimproved hole, and nobody has ranged it yet
     s.entrenchT = 0; s.rangedT = 0; s.rangedIn = false; s.rangedShots = 0;
-    if (c.occ.length === 1) Sound.shovel(c.x);
     return true;
   }
 
@@ -1127,8 +1126,17 @@ class Game {
     if (s.entrenchT < COVER.DIG_TIME) {
       const was = s.entrenchT;
       s.entrenchT = Math.min(COVER.DIG_TIME, s.entrenchT + dt);
-      if (was < COVER.DIG_TIME && s.entrenchT >= COVER.DIG_TIME) {
+      /* The spade is the sound of FINISHING the position, not of entering it.
+       *
+       * It used to fire on taking cover, for either side. Counted over a
+       * three-minute match that was 64 shovel hits — one every three seconds,
+       * because AI squads bounce in and out of cover constantly. Tied to the
+       * dig completing, for the player's own men, it happens once per position
+       * and means something. */
+      if (was < COVER.DIG_TIME && s.entrenchT >= COVER.DIG_TIME &&
+          s.side === this.player) {
         this.fx.floater(s.x, groundY(this.map, s.lane, s.x) - 34, 'DUG IN', '#b5c98f');
+        if (Camera.sees(s.x, 60)) Sound.shovel(s.x);
       }
     }
     if (!this._coverObserved(s)) return;
