@@ -794,6 +794,7 @@ class Game {
       s.underFireT = Math.max(0, s.underFireT - dt);
       s.emergeT = Math.max(0, s.emergeT - dt);
       s.nadeCd = Math.max(0, (s.nadeCd || 0) - dt);
+      s.bloopCd = Math.max(0, (s.bloopCd || 0) - dt);
       s.suppCd = Math.max(0, (s.suppCd || 0) - dt);
       if ((s.crossT || 0) > 0) s.crossT = Math.max(0, s.crossT - dt);
       /* Resupply, but only out of contact. A squad that has fired in the last
@@ -1400,6 +1401,8 @@ class Game {
       return true;
     } else if (order === 'grenade') {
       return this._squadGrenade(s);
+    } else if (order === 'blooper') {
+      return this._squadBlooper(s);
     } else if (order === 'focus') {
       return this._squadFocus(s);
     } else if (order === 'crosslane') {
@@ -1499,6 +1502,40 @@ class Game {
     m.nadeSmoke = true;
     m.nadeTarget = anchor + s.dir * SMOKE.range * 0.62;
     if (s.side === this.player) this.emit(`SMOKE OUT — LANE ${s.lane + 1}`, s.side);
+    return true;
+  }
+
+  /* Fire the M79. One round, arcing, landing on the target squad.
+   *
+   * Routed through `strikes` rather than through `nades` because the flight is
+   * long and flat-arced rather than a lobbed fuse, and because _updateStrikes
+   * already owns delayed impacts — explosion, crater, area damage, sound. The
+   * round therefore gets the dug-position blast multiplier for free, which is
+   * the entire reason the weapon exists. */
+  _squadBlooper(s) {
+    const sd = SQUADS[s.key];
+    if (!sd.blooper || (s.bloopCd || 0) > 0) return false;
+    const alive = this.squadAlive(s);
+    if (!alive.length) return false;
+    let target = null, bd = 1e9;
+    for (const o of this.squads) {
+      if (o.side === s.side || o.lane !== s.lane) continue;
+      if (!this.squadAlive(o).length) continue;
+      const oa = this.squadAnchor(o);
+      const d = Math.abs(oa - s.x);
+      if (d < M79.range && d < bd) { bd = d; target = oa; }
+    }
+    if (target == null) return false;
+    s.bloopCd = M79.cd;
+    const m = alive[0];
+    m.nadeT = 0.55;                       // he shoulders it briefly
+    Sound.blooper(m.x);
+    this.strikes.push({
+      type: 'm79', side: s.side, lane: s.lane, x: target, age: 0,
+      dur: M79.flight + 0.8,
+      impacts: [{ t: M79.flight, x: target + rand(-12, 12),
+                  r: M79.blast, dmg: M79.dmg, done: false }],
+    });
     return true;
   }
 
@@ -3028,6 +3065,18 @@ class Game {
             break;
           }
         }
+      }
+      /* The AI opens with HE on anything dug in. A trench is immune to its
+       * rifles, so a weapons team that has a blooper and does not use it on one
+       * is just standing there losing. */
+      if (sd.blooper && (s.bloopCd || 0) <= 0) {
+        const dugFoe = this.squads.some(o => o.side !== side && o.lane === s.lane &&
+          this.squadAlive(o).length && o.cover && o.cover.dug &&
+          Math.abs(this.squadAnchor(o) - s.x) < M79.range);
+        const massed = this.squads.filter(o => o.side !== side && o.lane === s.lane &&
+          this.squadAlive(o).length &&
+          Math.abs(this.squadAnchor(o) - s.x) < M79.range).length >= 2;
+        if (dugFoe || massed) this._squadBlooper(s);
       }
       if (sd.suppressive && (s.suppCd || 0) <= 0) {
         const close = this.squads.filter(o => o.side !== side && o.lane === s.lane &&

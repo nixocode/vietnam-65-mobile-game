@@ -334,6 +334,30 @@ const Sound = {
      * its own private echo. */
   },
 
+  /* THE BLOOPER, and it is named for this sound.
+   *
+   * An M79 does not crack — it is a low-pressure 40 mm round leaving a short
+   * fat tube, and what you hear is a hollow, almost comic *thoonk*: a soft
+   * pitched thump with a puff of gas behind it and no high-frequency snap at
+   * all. Synthesised rather than sampled precisely because it is the one
+   * weapon in the game whose voice is NOT a rifle report, so none of the four
+   * recordings can be bent into it.
+   *
+   * The falling pitch is the whole character: a short tone sliding down about
+   * an octave is what makes the ear hear a tube rather than a barrel. */
+  blooper(x) {
+    if (!this.ok()) return;
+    const { pan, att, far } = this._spatial(x);
+    const w = 0.16 + far * 0.9;
+    const j = rand(0.94, 1.07);
+    // the hollow pitched thump, sliding down
+    this._tone('sine', 300 * j, 0.13, 0.30 * att, 0, 150 * j, pan, w);
+    this._tone('triangle', 190 * j, 0.10, 0.16 * att, 0.004, 96 * j, pan, w);
+    // the gas puff behind it — soft, no snap
+    this._noise(0.05, 'bandpass', this._hi(760 * j, far), 1.1, 0.16 * att, 0, pan, w);
+    this._noise(0.16, 'lowpass', 420, 0.7, 0.07 * att, 0.02, pan, w + 0.2);
+  },
+
   /* A round that misses and skips off something hard. Randomised so a burst
    * that goes wide sounds like several rounds, not one sample repeated. */
   ricochet(x) {

@@ -455,6 +455,7 @@ const UI = {
        * squad into has room. */
       html += `<button data-o="cover" title="Take the nearest position, or break out of the one you are in (E)"><span class="sp-cov">COVER</span> <i>E</i></button>`;
       if (sd.grenades) html += `<button data-o="grenade"><span class="sp-cd"></span> <i>G</i></button>`;
+      if (sd.blooper) html += `<button data-o="blooper" title="M79 — high explosive at range. The infantry answer to a dug-in position (F)"><span class="sp-bl"></span> <i>F</i></button>`;
       html += `<button data-o="smoke" title="Pop smoke (S)"><i>S</i></button>`;
       html += `<button data-o="focus" title="Concentrate fire on the nearest enemy squad (X)">FOCUS <i>X</i></button>`;
       if (LANE_N > 1) html += `<button data-o="crosslane" title="Cross to the other lane — out of cover and holding fire while they move (V)">CROSS <i>V</i></button>`;
@@ -472,6 +473,12 @@ const UI = {
       const cd = Math.ceil(s.nadeCd || 0);
       nb.disabled = cd > 0;
       nb.querySelector('.sp-cd').textContent = cd ? `GRENADES ${cd}` : 'GRENADES';
+    }
+    const bl = el.querySelector('button[data-o="blooper"]');
+    if (bl) {
+      const cd = Math.ceil(s.bloopCd || 0);
+      bl.disabled = cd > 0;
+      bl.querySelector('.sp-bl').textContent = cd ? `M79 ${cd}` : 'M79';
     }
     const cb = el.querySelector('button[data-o="cover"]');
     if (cb) {
@@ -513,6 +520,7 @@ const UI = {
       if (up === 'B') { this.orderSel('fallback'); return true; }
       if (up === 'E') { this.orderSel('cover'); return true; }
       if (up === 'G') { this.orderSel('grenade'); return true; }
+      if (up === 'F') { this.orderSel('blooper'); return true; }
       if (up === 'S') { this.orderSel('smoke'); return true; }
       /* SUPPRESS WAS UNREACHABLE FROM THE KEYBOARD.
        *

@@ -345,13 +345,14 @@ WEAPON_MESH = {
     # RPG man carried a bulky rifle. Those two shapes ARE their weapons.
     'm40': 'BUILT:m40',
     'rpg': 'BUILT:rpg',
+    'm79': 'BUILT:m79',
 }
 # barrel length in metres, used to scale each mesh to a believable size
 WEAPON_LEN = {'m16': 0.99, 'ak': 0.87, 'm60': 1.10, 'svd': 1.20, 'm40': 1.16,
-              'rpg': 1.30}
+              'rpg': 1.30, 'm79': 0.74}
 # where the support hand grips, as a fraction of the weapon's length from the grip
 FOREGRIP_F = {'m16': 0.42, 'ak': 0.38, 'm60': 0.34, 'svd': 0.44, 'm40': 0.44,
-              'rpg': 0.30}
+              'rpg': 0.30, 'm79': 0.40}
 
 # Cross-section as (height / length, width / length), including magazine and
 # sights — i.e. the silhouette the side camera actually sees.
@@ -376,6 +377,7 @@ WEAPON_ASPECT = {
     'svd': (0.20, 0.050),
     'm40': (0.17, 0.050),   # bolt gun, internal magazine, slenderest of them
     'rpg': (0.22, 0.045),
+    'm79': (0.20, 0.052),
 }
 
 
@@ -540,6 +542,21 @@ def _build_weapon(kind):
         box(0.30, 0.34, 0.072, 0.122, 0.038, METAL)                  # ocular bell
         box(0.59, 0.635, 0.070, 0.124, 0.040, METAL)                 # objective bell
         box(0.53, 1.00, -0.020, 0.020, 0.028, METAL)                 # barrel
+    elif kind == 'm79':
+        # M79: a SHORT, FAT, BROKEN-LOOKING TUBE. Everything else in this game's
+        # kit is a long thin weapon, so the read at sprite size is entirely
+        # about proportion — barely two feet long, a 40 mm bore you can see, and
+        # a fat wooden forestock. Get those three and it cannot be mistaken for
+        # a rifle even at 84px.
+        box(0.00, 0.30, -0.062, 0.030, 0.058, WOOD)                  # shoulder stock
+        box(0.30, 0.40, -0.055, 0.035, 0.052, WOOD)                  # wrist
+        box(0.34, 0.42, -0.150, -0.040, 0.040, WOOD, shear=0.024)    # pistol grip
+        box(0.42, 0.46, -0.075, -0.035, 0.044, METAL)                # trigger guard
+        box(0.40, 0.52, -0.040, 0.040, 0.056, METAL)                 # receiver / hinge
+        box(0.52, 0.86, -0.036, 0.036, 0.062, METAL)                 # the fat barrel
+        box(0.56, 0.74, -0.048, 0.048, 0.070, WOOD)                  # forestock
+        box(0.60, 0.64, 0.040, 0.086, 0.026, METAL)                  # leaf sight
+        box(0.86, 0.90, -0.042, 0.042, 0.068, METAL)                 # muzzle ring
     elif kind == 'rpg':
         # RPG-7: a tube with a CONICAL WARHEAD. Both ends are distinctive and
         # neither existed on the stand-in.

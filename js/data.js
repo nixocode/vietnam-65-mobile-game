@@ -225,7 +225,7 @@ const SQUADS = {
                grenades: true, ability: 'Frag Grenades' },
   weapons:   { side: 'us', role: 'support', name: 'Weapons Team', sub: 'M60 + rifle', cost: 30, cd: 12,
                comp: ['m60', 'rifleman'], portrait: 'port_m60',
-               suppressive: true, ability: 'Suppressive Fire — pins a target squad' },
+               suppressive: true, blooper: true, ability: 'M79 Blooper — HE at range · Suppressive Fire — pins a target squad' },
   engineers: { side: 'us', role: 'special', name: 'Engineer Team', sub: 'Demo ×2', cost: 24, cd: 10,
                comp: ['engineer', 'engineer'], portrait: 'port_engineer',
                ability: 'Clears traps, tunnels, spider holes' },
@@ -262,6 +262,26 @@ const SQUADS = {
 };
 
 const GRENADE = { range: 115, blast: 44, dmg: 34, fuse: 0.7, flight: 0.85, cd: 14 };
+
+/* THE M79 — "the blooper".
+ *
+ * A break-action 40 mm grenade launcher, and the answer to a problem the cover
+ * pass created: a dug-in squad now shrugs off rifle fire almost entirely and is
+ * only broken by explosive, but the explosives available were a grenade you can
+ * only throw 115px and artillery you have to pay CP for and wait on. There was
+ * nothing in between — no infantry weapon that answers a trench.
+ *
+ * So its range is what matters: 260 lets a weapons team drop HE on a position
+ * from outside the range at which the position would tear them apart, which is
+ * exactly what the real thing was for. Bigger blast than a grenade, shorter
+ * cooldown than artillery, no CP. */
+const M79 = { range: 260, blast: 52, dmg: 28, flight: 1.05, cd: 13 };
+/* dmg 28, not 40. Measured at 40 it took 222 of a 240 HP dug-in squad in a
+ * single round — a squad wipe every eleven seconds from outside their reach,
+ * which is not an answer to a position, it is a delete button, and it applied
+ * just as well to troops in the open who were never the problem. At 28 it
+ * still breaks a trench (the dug multiplier is doing that work) without
+ * removing a squad in one shot anywhere else. */
 
 /* Smoke. The bounding-advance rules already say a squad will not cross open
  * ground while a lane is being swept — smoke is the tool that changes that
