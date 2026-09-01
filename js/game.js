@@ -801,6 +801,30 @@ class Game {
        * into a position it is ALREADY standing on. That is occupying ground the
        * player chose, not walking off to find better. */
       const autoSeek = s.side !== this.player;
+
+      /* AN AI SQUAD THAT HAS BEEN RANGED IN GETS OUT.
+       *
+       * The dig-in / ranged-in clock runs for both sides, but only the player
+       * had any way to answer it — the AI had no notion of the mechanic and
+       * simply sat in the hole until the rounds walked onto it. That is a
+       * system the player lives under and the enemy does not, which makes the
+       * player's own timing decision worth less: holding a position stops being
+       * a risk you both take and becomes a tax only you pay.
+       *
+       * The delay is deliberate. Reacting on the same frame as the ranging
+       * round would be inhuman and would make the warning unusable against the
+       * AI; a beat and a bit is a squad leader hearing it land and shouting. */
+      if (autoSeek && s.rangedIn) {
+        s.rangedReact = (s.rangedReact || 0) + dt;
+        if (s.rangedReact > 1.3) {
+          s.rangedReact = 0;
+          this.coverLeave(s);
+          s.coverCd = 4;          // do not dive back in and restart the clock
+          if (!s.hold) s.order = 'advance';
+          else { s.order = 'hold'; s.holdX = s.x + s.dir * 80; }
+        }
+      } else if (s.rangedReact) s.rangedReact = 0;
+
       // Under effective fire: get into the nearest position forward. Never back.
       if (autoSeek && s.order === 'advance' && s.underFireT > 0 && !s.inCover && !s.coverTarget) {
         const c = this.freeCoverAhead(s, 150);
