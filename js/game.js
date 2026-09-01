@@ -910,15 +910,32 @@ class Game {
         const c = this.freeCoverAhead(s, 150);
         if (c) { s.coverTarget = c; s.order = 'tocover'; }
       }
-      // Bounding: troops moving up occupy the strongpoints they pass through
-      // (trench, nest, tower, hide) instead of walking by them in the open.
+      /* Bounding: troops moving up occupy the strongpoints they pass through
+       * (trench, nest, tower, hide) instead of walking by them in the open.
+       *
+       * PLAYER SQUADS GARRISON A TRENCH THEY REACH, and only a trench.
+       *
+       * Removing auto-seek for the player was right for ordinary cover — a log
+       * is a decision — but measured over four-minute matches it left the
+       * player side occupying a dug position 0% of the time on three of five
+       * maps while the AI sat in them for a quarter of the match. Combined with
+       * a trench now being decisive, that is the player assaulting a held
+       * position from open ground, which is the fight I measured at 0 wins in 8.
+       *
+       * Warfare 1917 answers this with the lever rather than with micromanagement:
+       * troops stop at a trench unless it is set to send them through. That is
+       * exactly the control already built, so the lever governs it — HOLD and
+       * your men garrison the position they walk into, throw it and they pass
+       * straight by (see coverRoom, which refuses a thrown position). Ordinary
+       * cover stays fully manual. */
       s.coverCd = Math.max(0, (s.coverCd || 0) - dt);
-      if (autoSeek && s.order === 'advance' && !s.inCover && !s.coverTarget && !s.playerHeld &&
+      if (s.order === 'advance' && !s.inCover && !s.coverTarget && !s.playerHeld &&
           s.coverCd <= 0) {
         const strong = { trench: 1, nestpos: 1, towerpos: 1, hide: 1, wall: 1,
                          rubble: 1, window: 1 };
         let pick = null, bd = 1e9;
         for (const c of this.covers[s.lane]) {
+          if (!autoSeek && !c.dug) continue;      // the player garrisons trenches only
           if (!strong[c.type] || !this.coverRoom(c, s)) continue;
           if (!this.squadFitsCover(s, c)) continue;
           const dx = (c.x - s.x) * s.dir;
