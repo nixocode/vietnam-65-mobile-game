@@ -51,6 +51,16 @@
    "aspect": 2.5095
   },
   {
+   "name": "crates_a",
+   "hM": 0.693,
+   "wM": 2.095,
+   "groundY": 165.2,
+   "ppm": 107.2,
+   "res": 256,
+   "realH": 1.05,
+   "aspect": 3.0231
+  },
+  {
    "name": "deadtree_a",
    "hM": 4.652,
    "wM": 2.56,
@@ -69,6 +79,26 @@
    "res": 256,
    "realH": 0.62,
    "aspect": 3.1522
+  },
+  {
+   "name": "drum_a",
+   "hM": 0.89,
+   "wM": 1.495,
+   "groundY": 194.9,
+   "ppm": 150.26,
+   "res": 256,
+   "realH": 0.92,
+   "aspect": 1.6798
+  },
+  {
+   "name": "fence_bamboo",
+   "hM": 1.113,
+   "wM": 3.151,
+   "groundY": 167.7,
+   "ppm": 71.28,
+   "res": 256,
+   "realH": 1.25,
+   "aspect": 2.8311
   },
   {
    "name": "fern_a",
@@ -99,6 +129,16 @@
    "res": 256,
    "realH": 4.4,
    "aspect": 2.0636
+  },
+  {
+   "name": "hulk_a",
+   "hM": 1.285,
+   "wM": 2.75,
+   "groundY": 180.5,
+   "ppm": 81.66,
+   "res": 256,
+   "realH": 2.1,
+   "aspect": 2.1401
   },
   {
    "name": "hut_a",
@@ -179,6 +219,16 @@
    "res": 256,
    "realH": 3.9,
    "aspect": 0.9818
+  },
+  {
+   "name": "punji_a",
+   "hM": 0.434,
+   "wM": 0.88,
+   "groundY": 183.4,
+   "ppm": 255.18,
+   "res": 256,
+   "realH": 0.45,
+   "aspect": 2.0276
   },
   {
    "name": "rock_a",

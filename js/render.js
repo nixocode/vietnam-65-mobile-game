@@ -2771,6 +2771,23 @@ const Renderer = {
                      { flip: rng() < 0.5, fit: (17 + rng() * 6) * LANE_DEPTH[lane] });
         }
       }
+      /* THE DEBRIS OF SUPPLY.
+       *
+       * A firebase is not bare ground with sandbags on it — it is bare ground
+       * buried under what was flown in to hold it: crates, drums, and the
+       * empties nobody ever took out again. The base end of this map had the
+       * airstrip, the wire and the bunkers and nothing at human scale between
+       * them, so it read as architecture rather than as somewhere people were
+       * living very badly. */
+      if (typeof Props !== 'undefined' && Props.ready && Props.has('crates_a')) {
+        for (let i = 0; i < 7; i++) {
+          const x = WORLD_W * (0.05 + 0.042 * i) + rng() * 46;
+          const n = rng();
+          const kind = n < 0.45 ? 'crates_a' : n < 0.8 ? 'drum_a' : 'sandbags_pile';
+          Props.draw(ctx, kind, x, groundY(map, lane, x) + 2, 1,
+                     { flip: rng() < 0.5, fit: (12 + rng() * 5) * LANE_DEPTH[lane] });
+        }
+      }
     }
 
     /* GROUND FOUGHT OVER UNTIL NOTHING GREW ON IT.
@@ -2817,6 +2834,31 @@ const Renderer = {
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
+    }
+
+    /* Village fencing and battlefield wreckage.
+     *
+     * Split bamboo is what a Vietnamese village boundary actually was, and it
+     * is the cheapest possible way to say "somebody lives here" on the maps
+     * built around settlements. The burnt-out truck is the opposite statement
+     * for the maps that are only ground fought over — a wreck reads as history
+     * in a way a crater does not, because somebody drove it there. */
+    if (typeof Props !== 'undefined' && Props.ready && Props.has('fence_bamboo')) {
+      for (const st of (map.settlements || [])) {
+        if (st.lane !== lane) continue;
+        const cx = st.x * WORLD_W;
+        for (const off of [-150, 150]) {
+          const fx = cx + off + (rng() - 0.5) * 30;
+          Props.draw(ctx, 'fence_bamboo', fx, groundY(map, lane, fx) + 2, 1,
+                     { flip: off > 0, fit: (16 + rng() * 4) * LANE_DEPTH[lane] });
+        }
+      }
+    }
+    if (typeof Props !== 'undefined' && Props.ready && Props.has('hulk_a') &&
+        (map.dressing === 'churned' || map.id === 'iadrang')) {
+      const hx = WORLD_W * (0.30 + rng() * 0.44);
+      Props.draw(ctx, 'hulk_a', hx, groundY(map, lane, hx) + 2, 1,
+                 { flip: rng() < 0.5, fit: (26 + rng() * 6) * LANE_DEPTH[lane] });
     }
 
     // base dressing: watchtower over the US end, village gate at the VC end
@@ -4731,11 +4773,17 @@ const Renderer = {
       ctx.save();
       ctx.globalAlpha = t.discovered && player !== t.side ? 1 : 0.75;
       if (t.type === 'punji') {
-        ctx.fillStyle = '#241c10';
-        ctx.beginPath(); ctx.ellipse(t.x, y + 1, 10, 3, 0, 0, 7); ctx.fill();
-        ctx.strokeStyle = '#a89058'; ctx.lineWidth = 1.2;
-        for (let i = -6; i <= 6; i += 3) {
-          ctx.beginPath(); ctx.moveTo(t.x + i, y + 1); ctx.lineTo(t.x + i + 1, y - 4); ctx.stroke();
+        // a modelled pit, with the inked stakes as the fallback
+        if (!(typeof Props !== 'undefined' && Props.ready && Props.has('punji_a') &&
+              Props.draw(ctx, 'punji_a', t.x, y + 1, 1,
+                         { flip: (Math.floor(t.x / 37) % 2) === 1,
+                           fit: 15 * LANE_DEPTH[lane] }))) {
+          ctx.fillStyle = '#241c10';
+          ctx.beginPath(); ctx.ellipse(t.x, y + 1, 10, 3, 0, 0, 7); ctx.fill();
+          ctx.strokeStyle = '#a89058'; ctx.lineWidth = 1.2;
+          for (let i = -6; i <= 6; i += 3) {
+            ctx.beginPath(); ctx.moveTo(t.x + i, y + 1); ctx.lineTo(t.x + i + 1, y - 4); ctx.stroke();
+          }
         }
       } else {
         ctx.fillStyle = '#4a4a42';

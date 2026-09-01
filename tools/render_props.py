@@ -1205,6 +1205,192 @@ def build_rock_b():
                  130 + i, rough=0.55, subdiv=1)
 
 
+
+# ---- clutter: the things that say people have been living here ------------
+# The maps have terrain, cover and buildings and almost nothing between them.
+# A firebase is not bare ground with sandbags on it — it is bare ground covered
+# in the debris of supply: crates, drums, wire, rubbish. These are the cheapest
+# possible density, because they are small, they repeat, and none of them has to
+# survive close inspection.
+
+def build_crates():
+    """Ammo crates, stacked the way a working position stacks them: not neatly.
+
+    Wooden ammunition boxes are the single most characteristic object of a
+    supplied position, and they are the easiest thing in the world to build out
+    of boxes — which is the one shape this kit is genuinely good at.
+    """
+    import random as _r
+    _r.seed(41)
+    wood = _pmat('cr_wood', (0.126, 0.098, 0.056))
+    dark = _pmat('cr_dark', (0.076, 0.058, 0.032))
+    metal = _pmat('cr_metal', (0.052, 0.054, 0.050))
+    # bottom row of three, top row of two, one crate knocked askew
+    lay = [(-0.62, 0.0, 0.0), (0.0, 0.0, 0.0), (0.62, 0.0, 0.0),
+           (-0.30, 0.34, 0.0), (0.32, 0.34, 0.06)]
+    for (x, z, tilt) in lay:
+        w, h, d = 0.29, 0.16, 0.20
+        ob = _box(wood, x - w, -d, z, x + w, d, z + h * 2)
+        ob.rotation_euler = (0, tilt, 0)
+        # the strapping bands, which are what stop it reading as a plain block
+        _box(metal, x - w - 0.005, -d - 0.005, z + 0.06, x + w + 0.005, d + 0.005, z + 0.085)
+        _box(dark, x - w * 0.34, -d - 0.008, z + 0.03, x - w * 0.10, d + 0.008, z + h * 2 - 0.03)
+    # one lid off, leaning
+    ob = _box(wood, -0.05, -0.19, 0.0, 0.05, 0.19, 0.56)
+    ob.rotation_euler = (0, -0.42, 0)
+    ob.location = (-1.02, 0.0, 0.26)
+
+
+def build_drum():
+    """A 55-gallon drum, on its end, with one on its side beside it.
+
+    Fuel and water arrived in these and the empties never left. The rolling
+    hoops are the whole silhouette — without them a drum is a cylinder, and a
+    cylinder at this size is a smudge.
+    """
+    body = _pmat('dr_body', (0.086, 0.074, 0.042))
+    rust = _pmat('dr_rust', (0.112, 0.062, 0.030))
+    dark = _pmat('dr_dark', (0.048, 0.040, 0.024))
+    # upright: an octagonal barrel reads rounder than a box at this scale
+    import math as _m
+    R, H = 0.29, 0.86
+    for i in range(8):
+        a0 = i * _m.pi / 4
+        x0, y0 = _m.cos(a0) * R, _m.sin(a0) * R
+        seg = _box(body if i % 3 else rust, -0.075, -0.02, 0.0, 0.075, 0.02, H)
+        seg.location = (x0, y0, H / 2)
+        seg.rotation_euler = (0, 0, a0 + _m.pi / 2)
+    for hz in (0.24, 0.60):                       # the rolling hoops
+        for i in range(8):
+            a0 = i * _m.pi / 4
+            seg = _box(dark, -0.082, -0.03, -0.028, 0.082, 0.03, 0.028)
+            seg.location = (_m.cos(a0) * (R + 0.015), _m.sin(a0) * (R + 0.015), hz)
+            seg.rotation_euler = (0, 0, a0 + _m.pi / 2)
+    _box(dark, -R * 0.9, -R * 0.9, H, R * 0.9, R * 0.9, H + 0.03)   # lid
+    # NO BARREL ON ITS SIDE.
+    #
+    # There was one, and it was geometrically correct and completely unreadable:
+    # the camera is a locked orthographic side view, so a cylinder lying along X
+    # presents as a plain rectangle. The staves really did wrap the axis — the
+    # wrap is just entirely in the depth the camera cannot see. A second UPRIGHT
+    # drum, shorter and turned, gives the pair without asking the viewer to
+    # infer a cylinder from a rectangle.
+    R2, H2 = 0.25, 0.62
+    for i in range(8):
+        a0 = i * _m.pi / 4 + 0.4
+        seg = _box(rust if i % 3 else body, -0.066, -0.02, 0.0, 0.066, 0.02, H2)
+        seg.location = (0.86 + _m.cos(a0) * R2, _m.sin(a0) * R2, H2 / 2)
+        seg.rotation_euler = (0, 0, a0 + _m.pi / 2)
+    for hz in (0.18, 0.44):
+        for i in range(8):
+            a0 = i * _m.pi / 4 + 0.4
+            seg = _box(dark, -0.072, -0.03, -0.024, 0.072, 0.03, 0.024)
+            seg.location = (0.86 + _m.cos(a0) * (R2 + 0.014),
+                            _m.sin(a0) * (R2 + 0.014), hz)
+            seg.rotation_euler = (0, 0, a0 + _m.pi / 2)
+    _box(dark, 0.86 - R2 * 0.9, -R2 * 0.9, H2,
+         0.86 + R2 * 0.9, R2 * 0.9, H2 + 0.03)
+
+
+def build_bamboo_fence():
+    """A village fence: split bamboo lashed to two rails, leaning where it has
+    been walked past for years. Vertical repetition with irregular gaps and
+    heights — the irregularity IS the read, a even fence looks manufactured."""
+    import random as _r
+    _r.seed(63)
+    cane = _pmat('bf_cane', (0.142, 0.128, 0.066))
+    pale = _pmat('bf_pale', (0.170, 0.156, 0.086))
+    dark = _pmat('bf_dark', (0.078, 0.070, 0.038))
+    W = 1.55
+    x = -W
+    while x < W:
+        h = 0.78 + _r.random() * 0.34
+        w = 0.025 + _r.random() * 0.022
+        lean = (_r.random() - 0.5) * 0.10
+        ob = _box(pale if _r.random() < 0.34 else cane, -w, -0.018, 0.0, w, 0.018, h)
+        ob.location = (x, 0.0, h / 2)
+        ob.rotation_euler = (0, lean, 0)
+        # a node band or two up each cane
+        if _r.random() < 0.6:
+            _box(dark, x - w - 0.004, -0.022, h * 0.52, x + w + 0.004, 0.022, h * 0.52 + 0.018)
+        x += w * 2 + 0.012 + _r.random() * 0.030
+    for rz in (0.26, 0.66):                       # the two rails
+        _box(dark, -W, -0.030, rz, W, 0.030, rz + 0.036)
+
+
+def build_hulk():
+    """A burnt-out truck: chassis, wheel stubs, a collapsed cab, nothing else.
+
+    Battlefield debris that is not a crater. Deliberately unidentifiable — it is
+    a wreck, and a wreck reads by its BROKEN silhouette rather than by any
+    surviving detail. All one dead value, because fire takes the colour out of
+    everything before it takes the shape.
+    """
+    import random as _r
+    _r.seed(29)
+    burnt = _pmat('hk_burnt', (0.036, 0.032, 0.028))
+    ash = _pmat('hk_ash', (0.058, 0.054, 0.048))
+    rust = _pmat('hk_rust', (0.078, 0.046, 0.026))
+    _box(burnt, -1.45, -0.52, 0.32, 1.30, 0.52, 0.50)         # chassis rail
+    _box(ash, -1.30, -0.50, 0.50, 0.10, 0.50, 0.72)           # bed, caved in
+    _box(rust, -1.28, -0.46, 0.70, -0.20, 0.46, 0.76)
+    # the cab, folded forward
+    ob = _box(burnt, 0.16, -0.48, 0.50, 1.02, 0.48, 1.22)
+    ob.rotation_euler = (0, 0.22, 0)
+    _box(ash, 0.30, -0.44, 1.16, 0.92, 0.44, 1.26)
+    _box(burnt, 1.02, -0.44, 0.44, 1.30, 0.44, 0.86)          # bonnet
+    # wheels: two burnt to the rim, one missing, one flat
+    for (wx, r, flat) in [(-1.04, 0.30, False), (0.86, 0.30, True), (-0.30, 0.0, False)]:
+        if r <= 0:
+            continue
+        for sy in (-0.56, 0.50):
+            _box(burnt, wx - r, sy, 0.02, wx + r, sy + 0.06, (0.16 if flat else r * 2) + 0.02)
+    # ribs of the frame showing through where the body burned away
+    for i in range(4):
+        rx = -1.16 + i * 0.34
+        _box(rust, rx, -0.48, 0.50, rx + 0.035, 0.48, 0.96 + _r.random() * 0.14)
+
+
+def build_punji():
+    """A punji pit, sprung and open: the lid thrown back and the stakes showing.
+
+    The game places punji traps and drew nothing for a sprung one. Fire-hardened
+    bamboo, set at an angle, in a shallow pit with the spoil around the lip —
+    small, low, and unmistakable once you know what it is.
+    """
+    import random as _r
+    import math as _m
+    _r.seed(17)
+    cane = _pmat('pj_cane', (0.130, 0.112, 0.056))
+    tip = _pmat('pj_tip', (0.062, 0.048, 0.026))
+    soil = _pmat('pj_soil', (0.072, 0.056, 0.032))
+    # the spoil ring
+    for i in range(10):
+        a0 = i * _m.pi / 5
+        _box(soil, -0.14, -0.07, 0.0, 0.14, 0.07, 0.05 + _r.random() * 0.04)
+    # A PIT, not a bundle of sticks.
+    #
+    # Two rewrites in: 16 mm stakes were pale hairs, 28 mm ones were planks, and
+    # both leaned randomly so they read as scattered debris. Real punji are set
+    # at a consistent angle in a hole, and it is the DARK MOUTH under them that
+    # says pit — without it there is nothing for the stakes to be standing in.
+    _box(tip, -0.34, -0.16, -0.02, 0.34, 0.16, 0.055)          # the open mouth
+    for i in range(10):
+        x = -0.28 + i * 0.062 + (_r.random() - 0.5) * 0.016
+        h = 0.26 + _r.random() * 0.13
+        lean = 0.30 + (_r.random() - 0.5) * 0.16               # all the same way
+        ob = _box(cane, -0.019, -0.019, 0.0, 0.019, 0.019, h)
+        ob.location = (x, (_r.random() - 0.5) * 0.11, h / 2 + 0.02)
+        ob.rotation_euler = (0, lean, 0)
+        t = _box(tip, -0.013, -0.013, 0.0, 0.013, 0.013, 0.075)
+        t.location = (x + _m.sin(lean) * h * 0.55, 0.0, h - 0.01)
+        t.rotation_euler = (0, lean, 0)
+    for i in range(8):                                          # spoil on the lip
+        a0 = i * _m.pi / 4
+        _box(soil, -0.10 + _m.cos(a0) * 0.34, -0.06, 0.0,
+             0.10 + _m.cos(a0) * 0.34, 0.06, 0.04 + _r.random() * 0.035)
+
+
 BUILT = {
     'm113':       (build_m113, 2.6),
     'huey':       (build_huey, 4.4),   # UH-1 rotor diameter aside, 4.4 m to the hub
@@ -1223,6 +1409,11 @@ BUILT = {
     'vine_a':     (build_vine, 1.30),
     # cover — the last of the inked kit to be replaced
     'dike_a':      (build_dike, 0.62),
+    'crates_a':    (build_crates, 1.05),
+    'drum_a':      (build_drum, 0.92),
+    'fence_bamboo':(build_bamboo_fence, 1.25),
+    'hulk_a':      (build_hulk, 2.10),
+    'punji_a':     (build_punji, 0.45),
     'rock_a':      (build_rock_a, 1.15),   # chest-high: stand-behind cover
     'rock_b':      (build_rock_b, 0.80),   # knee-high cluster: go-prone cover
     'stonewall_a': (build_stonewall, 1.05),
