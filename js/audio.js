@@ -358,6 +358,64 @@ const Sound = {
     this._noise(0.16, 'lowpass', 420, 0.7, 0.07 * att, 0.02, pan, w + 0.2);
   },
 
+  /* WHERE A ROUND LANDS, not just that it was fired.
+   *
+   * The game already decides what a miss hits — timber off a hut, sparks off an
+   * emplacement, water in a paddy, dirt everywhere else — and drew all four
+   * while only two of them made any sound. A firefight where the outgoing fire
+   * is loud and nothing ever lands reads as a shooting gallery: the rounds have
+   * no destination.
+   *
+   * All four are synthesised, and they are short and quiet on purpose. There
+   * are a great many of them, so each one is a texture rather than an event —
+   * the moment an impact is as loud as a shot, the mix turns to mud.
+   */
+  impact(kind, x) {
+    if (!this.ok()) return;
+    const { pan, att, far } = this._spatial(x);
+    const w = 0.2 + far * 0.9;
+    const j = rand(0.9, 1.15);
+    const a = att * 0.5;                       // impacts sit well under the guns
+    if (kind === 'wood') {
+      // a dry crack and a short splintery tail
+      this._noise(0.02, 'bandpass', this._hi(1500 * j, far), 2.2, 0.15 * a, 0, pan, w);
+      this._noise(0.07, 'bandpass', this._hi(900 * j, far), 1.1, 0.08 * a, 0.005, pan, w);
+    } else if (kind === 'water') {
+      // a plop with a rising tail — the only impact that is not percussive
+      this._tone('sine', 420 * j, 0.07, 0.10 * a, 0, 900 * j, pan, w);
+      this._noise(0.10, 'lowpass', 1400, 0.8, 0.09 * a, 0.004, pan, w + 0.15);
+    } else if (kind === 'metal') {
+      this._noise(0.012, 'highpass', this._hi(4200 * j, far), 1, 0.10 * a, 0, pan, w);
+      this._tone('square', 1800 * j, 0.05, 0.05 * a, 0.002, 700 * j, pan, w);
+    } else {
+      // dirt: a dull thud, no ring at all
+      this._noise(0.03, 'lowpass', 700 * j, 0.8, 0.13 * a, 0, pan, w);
+      this._noise(0.06, 'bandpass', 320 * j, 0.9, 0.06 * a, 0.006, pan, w + 0.1);
+    }
+  },
+
+  /* A MAN GOING DOWN.
+   *
+   * Casualties were completely silent — men fell out of a firefight with no
+   * acknowledgement at all, which is the single largest missing beat in the
+   * mix and, for a game about this war, the wrong thing to leave quiet.
+   *
+   * Deliberately not a scream. It is a short, choked-off vocal shape: a
+   * band-passed noise burst with a falling pitch, close to a grunt. Loud enough
+   * to register a loss, brief enough to survive hearing it often, and it does
+   * not turn a firefight into a horror film. */
+  manDown(x) {
+    if (!this.ok()) return;
+    const { pan, att, far } = this._spatial(x);
+    if (far > 0.86) return;                    // too distant to be a voice
+    const w = 0.24 + far * 0.8;
+    const j = rand(0.86, 1.2);
+    const a = att * 0.42 * (1 - far * 0.5);
+    this._noise(0.13, 'bandpass', this._hi(520 * j, far), 3.4, 0.22 * a, 0, pan, w);
+    this._tone('sawtooth', 210 * j, 0.12, 0.05 * a, 0.004, 120 * j, pan, w);
+    this._noise(0.07, 'lowpass', 300, 0.7, 0.07 * a, 0.10, pan, w + 0.15);
+  },
+
   /* A round that misses and skips off something hard. Randomised so a burst
    * that goes wide sounds like several rounds, not one sample repeated. */
   ricochet(x) {

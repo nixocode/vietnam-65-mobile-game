@@ -2102,16 +2102,22 @@ class Game {
           if (hitSt.kind === 'tower' || hitSt.kind === 'mgnest') {
             this.fx.sparks(ex, ey);
             if (Math.random() < 0.5) Sound.ricochet(ex);
+            else if (Math.random() < 0.5) Sound.impact('metal', ex);
           } else {
             this.fx.splinters(ex, ey, scale);
             if (Math.random() < 0.2) Sound.ricochet(ex);
+            else if (Math.random() < 0.45) Sound.impact('wood', ex);
           }
         } else if (this.map.trees === 'palm' && Math.random() < 0.35) {
           this.fx.waterPlume(ex, gy);
+          if (Math.random() < 0.5) Sound.impact('water', ex);
         } else {
           // a belt-fed gun throws visibly more earth than a rifle — an M60 burst
           // and a single rifle shot used to land identically
           this.fx.dirtKick(ex, gy, scale, !!d.mg || !!suppressive);
+          /* Dirt is by far the most common impact, so it is the one most able
+           * to turn the mix to mud — a quarter of them, not all. */
+          if (Math.random() < 0.25) Sound.impact('dirt', ex);
         }
       }
       // cracking rounds keep heads down even when they miss
@@ -2239,6 +2245,8 @@ class Game {
     }
     t.deadT = 0;
     t.aiming = false;
+    // a man leaving the fight is worth hearing — see Sound.manDown
+    if (!t.isHole && !(UNITS[t.key] && UNITS[t.key].vehicle)) Sound.manDown(t.x);
     if (UNITS[t.key] && UNITS[t.key].vehicle) {
       // a knocked-out track brews up; no corpse, no blood
       t.baked = true;
