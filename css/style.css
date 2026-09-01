@@ -1176,3 +1176,30 @@ body.touch #squad-panel {
   top: calc(74px / var(--uiK, 1));
   bottom: auto;
 }
+
+/* ============================================================
+   FILL THE PHONE
+   A 16:9 stage on a 2.16:1 phone leaves black bars down both
+   sides — measured on 844x390, the game got 693px of an 844px
+   screen and 18% of the display was wasted. Landscape phones
+   have not been 16:9 for years.
+
+   The renderer is untouched: it still draws a fixed 1280x720
+   design space, the backing store stays 16:9 (see fitDPR), and
+   CSS crops it into a wider box with `object-fit: cover`. What
+   is lost is about 64 design pixels off the top and the same off
+   the bottom — sky, and the foreground plant band. Neither
+   carries anything you play against, and the near lane at y545
+   sits comfortably inside what is left.
+
+   What is gained is the whole screen, and a --uiK that rises
+   from 0.54 to 0.66, so the HUD comes up 22% with it.
+   ============================================================ */
+body.touch #stage {
+  aspect-ratio: auto;
+  width: 100%;
+  height: 100%;
+}
+body.touch #game-canvas { object-fit: cover; }
+/* the HUD box follows the screen's shape — see _fitUI */
+body.touch #hud, body.touch .screen { height: var(--uiH, 720px); }

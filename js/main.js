@@ -29,7 +29,18 @@ const App = {
     if (!stage) return;
     const w = stage.clientWidth;
     if (!(w > 0)) return;                 // pre-layout; a 0 here would blank the UI
-    stage.style.setProperty('--uiK', w / CANVAS_W);
+    const k = w / CANVAS_W;
+    stage.style.setProperty('--uiK', k);
+    /* The HUD box takes the STAGE's shape, not the design one.
+     *
+     * `#hud` is 1280x720 scaled by --uiK, which lands exactly on a 16:9 stage.
+     * On a phone filling a 2.16:1 screen the scaled box is ~85px taller than
+     * the screen, so everything anchored to its bottom — the card bar, the CP
+     * readout — falls off the end of the display. Expressed in design pixels,
+     * the box the HUD should occupy is the stage height divided back out of
+     * the scale. */
+    const h = stage.clientHeight;
+    if (h > 0) stage.style.setProperty('--uiH', (h / k) + 'px');
   },
 
   boot() {

@@ -780,8 +780,15 @@ const Renderer = {
     // no visible gain at this art scale, and it is what kills frame rate on
     // phones and Retina panels.
     const dpr = Math.min(window.devicePixelRatio || 1, 2) * this.renderScale;
+    /* The BITMAP is always 16:9, whatever shape the element is.
+     *
+     * The renderer draws a fixed 1280x720 design space. Sizing the backing
+     * store from the element's own height means that on a phone screen wider
+     * than 16:9 the design space would be squashed into a 2.16:1 bitmap. The
+     * element can be any shape it likes; CSS `object-fit: cover` crops the
+     * 16:9 bitmap into it. */
     const w = Math.max(1, Math.round(c.clientWidth * dpr));
-    const h = Math.max(1, Math.round(c.clientHeight * dpr));
+    const h = Math.max(1, Math.round(w * CANVAS_H / CANVAS_W));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     this._k = c.width / CANVAS_W;
   },

@@ -305,11 +305,23 @@ const UI = {
     }
   },
 
+  /* Screen point -> design point, for a canvas drawn with `object-fit: cover`.
+   *
+   * This used to map the element box linearly onto 1280x720, which is only
+   * right while the element IS 16:9. On a phone the stage now fills a screen
+   * wider than that and the bitmap is cropped top and bottom, so a linear map
+   * put every click about sixty design pixels low — enough to pick the wrong
+   * lane near a band edge. Solving for the cover transform costs two lines and
+   * is exact in both cases: on an exactly-16:9 box the offsets fall out to
+   * zero and this reduces to what it replaced. */
   _canvasPos(e) {
     const r = this.canvas.getBoundingClientRect();
+    const s = Math.max(r.width / CANVAS_W, r.height / CANVAS_H);
+    const ox = (r.width - CANVAS_W * s) / 2;    // negative where it is cropped
+    const oy = (r.height - CANVAS_H * s) / 2;
     return {
-      x: (e.clientX - r.left) * (CANVAS_W / r.width),
-      y: (e.clientY - r.top) * (CANVAS_H / r.height),
+      x: (e.clientX - r.left - ox) / s,
+      y: (e.clientY - r.top - oy) / s,
     };
   },
 
