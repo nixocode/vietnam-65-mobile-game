@@ -350,6 +350,20 @@ const UI = {
     if (lane == null) { this.disarm(); this.selectSquad(null); return; }
     const g = this.game;
     const wx = clamp(p.x + Camera.x, 10, WORLD_W - 10);
+    /* The lever is checked FIRST and swallows the click.
+     *
+     * It sits on the parapet, which is also a perfectly good place to order a
+     * squad to — so without this, throwing the lever would also issue a move
+     * order to whatever was selected. */
+    if (!this.armedUnit && !this.armedCallin) {
+      for (const c of g.covers[lane]) {
+        if (!c.lever) continue;
+        const P = Renderer.leverPoint(g.map, lane, c);
+        if (Math.abs(P.x - wx) > P.r || Math.abs(P.y - p.y) > P.r) continue;
+        g.toggleLever(c);
+        return;
+      }
+    }
     if (this.armedUnit) {
       if (g.trySpawn(g.player, this.armedUnit, lane)) {
         Sound.click();

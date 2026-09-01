@@ -3521,7 +3521,7 @@ const Renderer = {
         // back half only — the near parapet is drawn over the men, see
         // _drawCoverFore. Runs before the translate/scale the rest of the
         // switch works in, because it needs world-space groundY.
-        this._trenchArt(ctx, map, lane, c, false);
+        this._trenchArt(ctx, map, lane, c, false, 0);
         continue;
       }
       if (c.type === 'rock') {
@@ -3676,175 +3676,213 @@ const Renderer = {
     }
   },
 
-  /* A TRENCH IS A THING YOU STAND IN.
+  /* A TRENCH IS A SLOT CUT ACROSS THE LANE BAND.
    *
-   * The first version reused `_trenchLine`, the Khe Sanh firebase decoration.
-   * Captured at 1:1 it read as a flat tan plank floating over a black bar —
-   * which is what that art is: a flat-topped rectangle with a hard edge and a
-   * dark slot under it. Across a 330px firebase perimeter the sine wobble
-   * carries it. Across a 62px cover it is one straight section, and the eye
-   * reads a plank.
+   * Rebuilt after the first version shipped looking like a bucket floating on
+   * the grass, because it was drawn against the wrong geometry.
    *
-   * The thing that actually makes a trench read is not the parapet, it is the
-   * OCCLUSION: men in a trench are cut off at the shins by the near lip. Cover
-   * is drawn before the units, so nothing was ever in front of them. So the
-   * position is drawn twice — spoil and slot behind the men, near parapet over
-   * them — and the men are standing IN it rather than on it.
+   * A lane is a BAND, not a line: LANE_BANDS[1] spans y 476..700. `groundY` is
+   * the BACK edge of that band, and the men stand roughly 39*depth px FORWARD
+   * of it — measured by hiding the sprite and diffing the column, a rifleman
+   * with groundY 481 casts his contact shadow at 525. So art anchored at
+   * `groundY` sits at the far edge of the strip, behind the men, which is
+   * exactly right for a sandbag wall and exactly wrong for a trench: the old
+   * parapet ran from the back edge to the men's boots and stopped dead in a
+   * hard horizontal line with more ground drawn below it. That line is what
+   * read as "floating slab".
+   *
+   * So the trench is now built around the FOOT line rather than groundY:
+   *
+   *     gy ......... back edge of the band, spoil thrown out behind
+   *     F - 28 ..... crest of the near parapet (about a standing man's waist)
+   *     F .......... where a man's boots sit on open ground
+   *     F + sink ... where they sit once they are down in the cut
+   *     F + 22 ..... the parapet's foot, FADED OUT rather than cut off
+   *
+   * Nothing has a hard bottom edge any more; the near bank dissolves into the
+   * ground over its last few pixels, which is the whole difference between
+   * earth piled on a field and a box sitting on one.
    */
-  _trenchArt(ctx, map, lane, c, fore) {
+  TRENCH_SINK: 18,        // how far a man drops when he is down in the cut
+
+  _trenchFoot(lane) { return S3_TARGET_H * LANE_DEPTH[lane] * S3_FOOT; },
+
+  _trenchArt(ctx, map, lane, c, fore, reveal) {
     const dep = LANE_DEPTH[lane];
-    const p = map.pal;
-    /* The ART is wider than the COVER. A 34px-tall bank tapering inside a
-     * 108px span has nowhere to put its ends, and they came out as near
-     * vertical faces with a hard corner. Twenty-two pixels of run either side
-     * gives the taper room; the cover's own width, which is what the sim uses
-     * for occupancy and targeting, is untouched. */
-    const pad = 22 * LANE_DEPTH[lane];
+    const F = this._trenchFoot(lane);
+    const pad = 20 * dep;
     const x0 = c.x - c.w / 2 - pad, x1 = c.x + c.w / 2 + pad;
     const rng = seeded((map.seed + Math.floor(c.x) * 31) >>> 0);
     const cols = [];
     for (let x = x0; x <= x1 + 0.01; x += 5) cols.push(x);
     cols.push(x1);
-    const gy = x => groundY(map, lane, x);
-    // one jitter table per position, so the lumps do not crawl between frames
     const jit = cols.map(() => rng());
+    const gy = x => groundY(map, lane, x);
+    // 1 across the cover, tapering to 0 through the pads, so both banks die
+    // away at their ends instead of being sliced off square
+    const in0 = c.x - c.w / 2, in1 = c.x + c.w / 2;
+    const k = x => x < in0 ? Math.max(0, (x - x0) / pad)
+                 : x > in1 ? Math.max(0, (x1 - x) / pad) : 1;
+    const ease = x => Math.pow(k(x), 1.3);
 
-    /* EARTH COLOURS, not palette colours.
-     *
-     * The first version tinted `pal.laneTop` upward, on the reasoning that
-     * fresh spoil is lighter than turf. Captured at 3x it came out a bright
-     * cream slab on olive ground — `laneTop` is the top of the ground GRADIENT,
-     * not the colour the ground actually renders at, so tinting it lighter put
-     * the parapet a long way off the scene. These are the browns the crater and
-     * the old trench mounds already use in this same pass, which are known to
-     * sit correctly. */
-    const EARTH = '#5c4a2e', EARTH_LIP = '#5f4d31';
-    /* WHERE THE MEN ACTUALLY ARE.
-     *
-     * `groundY` is not the plane a soldier stands on. Measured by rendering a
-     * lone rifleman twice and diffing the column: with groundY at 508 his
-     * sprite spans 466..552, so his BOOTS are 44px BELOW the line every piece
-     * of cover art is anchored to, and his hips are on it. The existing kit
-     * gets away with it — a sandbag wall spans -52..+15 and leaves the boots
-     * showing, and at chest height nobody reads that as wrong.
-     *
-     * A trench cannot get away with it. A parapet that stops at +6 leaves 38px
-     * of shin and boot hanging below the bank, which is precisely the "standing
-     * on it, not in it" look this pass exists to fix. So the near bank runs
-     * down to the boot line. */
-    const BOOT = 42 * dep;
+    const EARTH = '#5c4a2e', LIP = '#6a5636', DARK = '#241c11';
 
     if (!fore) {
-      const spoil = EARTH;
-      const taperAt = x => Math.sin(Math.PI *
-        Math.min(1, Math.max(0, (x - x0) / Math.max(1, x1 - x0))));
-      const farTop = (x, i) => gy(x) - (9 + 10 * taperAt(x) + jit[i] * 3) * dep;
+      /* Behind the men: spoil thrown out on the far lip, and the back wall of
+       * the cut in shadow. Both sit between the band's back edge and the foot
+       * line, so they read as the far side of a slot. */
+      const back = (x, i) => gy(x) + F * 0.30 - (7 + 7 * ease(x) + jit[i] * 2.5) * dep;
       ctx.beginPath();
-      ctx.moveTo(x0 - 3 * dep, gy(x0) + 2 * dep);
-      cols.forEach((x, i) => ctx.lineTo(x, farTop(x, i)));
-      ctx.lineTo(x1 + 3 * dep, gy(x1) + 2 * dep);
+      cols.forEach((x, i) => (i ? ctx.lineTo(x, back(x, i)) : ctx.moveTo(x, back(x, i))));
+      for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i], gy(cols[i]) + F * 0.62);
       ctx.closePath();
-      ctx.fillStyle = spoil; ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      ctx.fillStyle = EARTH; ctx.fill();
+      ctx.fillStyle = 'rgba(255,244,214,0.08)';
       ctx.beginPath();
-      ctx.moveTo(x0 - 3 * dep, gy(x0) + 2 * dep);
-      cols.forEach((x, i) => ctx.lineTo(x, farTop(x, i) + 3 * dep));
-      ctx.lineTo(x1 + 3 * dep, gy(x1) + 2 * dep);
+      cols.forEach((x, i) => (i ? ctx.lineTo(x, back(x, i)) : ctx.moveTo(x, back(x, i))));
+      for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i], back(cols[i], i) + 3 * dep);
       ctx.closePath(); ctx.fill();
 
-      /* THE SLOT. Rounded at both ends — a dug trench ramps in, it does not
-       * stop at a vertical wall, and square ends were most of why the old art
-       * read as a printed rectangle. */
-      // sits in the band between the far bank's foot and the near bank's crest,
-      // which is the only strip of the hole the near parapet does not cover
-      const d0 = 7 * dep, d1 = -3 * dep;
+      // the cut itself: a dark trough the men stand down inside
       ctx.beginPath();
-      ctx.moveTo(x0, gy(x0) - d0);
-      cols.forEach(x => ctx.lineTo(x, gy(x) - d0));
-      ctx.quadraticCurveTo(x1 + 5 * dep, gy(x1) + (d1 - d0) * 0.4, x1 - 4 * dep, gy(x1) + d1);
-      for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i], gy(cols[i]) + d1);
-      ctx.quadraticCurveTo(x0 - 5 * dep, gy(x0) + (d1 - d0) * 0.4, x0, gy(x0) - d0);
+      cols.forEach((x, i) => (i ? ctx.lineTo(x, gy(x) + F * 0.62)
+                                : ctx.moveTo(x, gy(x) + F * 0.62)));
+      for (let i = cols.length - 1; i >= 0; i--) {
+        ctx.lineTo(cols[i], gy(cols[i]) + F + 10 * dep * ease(cols[i]));
+      }
       ctx.closePath();
-      ctx.fillStyle = 'rgba(11,9,6,0.90)'; ctx.fill();
-      // a sliver of lit back wall, so the hole has depth instead of being ink
-      ctx.strokeStyle = '#4a3a24';
-      ctx.lineWidth = 1.6 * dep;
-      ctx.beginPath();
-      cols.forEach((x, i) => (i ? ctx.lineTo(x, gy(x) - d0 + 1.4 * dep)
-                                : ctx.moveTo(x, gy(x) - d0 + 1.4 * dep)));
-      ctx.stroke();
+      ctx.fillStyle = DARK;
+      ctx.globalAlpha = 0.72;
+      ctx.fill();
+      ctx.globalAlpha = 1;
       return;
     }
 
-    /* NEAR PARAPET, over the men.
+    /* IN FRONT of the men: the near parapet.
      *
-     * TAPERED, not a slab. The first version ran a constant height across the
-     * span and closed with straight diagonals to the ground, which draws a
-     * trapezoid — and a flat-topped trapezoid in front of a soldier reads as a
-     * table he is standing behind. The height is now a sine bell across the
-     * span, so the bank rises out of the ground and settles back into it, and
-     * the lumps ride on top of that rather than on a flat line.
+     * `reveal` fades it to a cutaway so the player can see who is in the
+     * position — see _drawCoverFore. The gradient and the faded foot are what
+     * stop it reading as a flat card. */
+    const crest = (x, i) =>
+      gy(x) + F - (26 * ease(x) + Math.sin((x - x0) * 0.13) * 2 + jit[i] * 2.5) * dep;
+    /* The foot has to clear the BOOTS.
      *
-     * 12px, not 19. At 19 the crest sat across the men's chests: correct for a
-     * real trench, unreadable in a game where you need to see who is in it. */
-    const bell = x => Math.pow(Math.sin(Math.PI *
-      Math.min(1, Math.max(0, (x - x0) / Math.max(1, x1 - x0)))), 0.55);
-    const top = (x, i) =>
-      gy(x) - (9 * bell(x) + Math.sin((x - x0) * 0.16) * 1.6 + jit[i] * 2) * dep;
-    /* The FOOT tapers too, but only across the PADS.
+     * A sunk man's boots land at F + TRENCH_SINK + F... no: he is drawn
+     * TRENCH_SINK lower, so his contact point is gy + F + SINK. The first
+     * version faded the bank to transparent from the middle down and ended the
+     * polygon at F + 22 — above the boots — so the legs showed straight through
+     * the part of the bank that was supposed to be hiding them. The bank now
+     * stays FULLY OPAQUE past the boot line and only dissolves below it. */
+    const bootY = F + this.TRENCH_SINK * dep;
+    /* BOTH edges collapse to the same point at the ends.
      *
-     * With a flat bottom the polygon closed with a sheer vertical drop at each
-     * end. With the taper driven by the same bell as the crest it started
-     * rising immediately, so the men at the outside of a crowded trench had
-     * their legs hanging below the bank — the exact thing this pass exists to
-     * stop. The 22px pads either side are what the taper is for; inside the
-     * cover's own width the bank runs full depth. */
-    const in0 = c.x - c.w / 2, in1 = c.x + c.w / 2;
-    const padK = x => x < in0 ? Math.max(0, (x - x0) / pad)
-                    : x > in1 ? Math.max(0, (x1 - x) / pad) : 1;
-    // >1 so the toe comes out of the ground gradually instead of stepping up
-    const foot = x => gy(x) + BOOT * Math.pow(padK(x), 1.4);
-    const band = (fill, lift) => {
+     * The crest tapered to zero height but the foot still sat a full
+     * SINK+20 below it, so the polygon closed with a 19px vertical wall at
+     * each end — which is precisely the hard-edged "card laid on the scene"
+     * look. Anchoring the foot to the same F line means the bank comes to a
+     * point and dies into the ground the way a spoil heap does. */
+    const footY = x => gy(x) + F + (bootY - F + 20 * dep) * ease(x);
+    const a = 1 - 0.72 * reveal;
+    if (a <= 0.02) return;
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    const gTop = gy(c.x) + F - 28 * dep;
+    const gBot = gy(c.x) + bootY + 20 * dep;
+    const solid = (gy(c.x) + bootY + 5 * dep - gTop) / (gBot - gTop);
+    const grad = ctx.createLinearGradient(0, gTop, 0, gBot);
+    grad.addColorStop(0, LIP);
+    grad.addColorStop(Math.min(0.9, solid * 0.6), EARTH);
+    grad.addColorStop(Math.min(0.95, solid), '#3c3020');
+    grad.addColorStop(1, 'rgba(48,38,23,0)');   // dissolves into the ground
+    ctx.beginPath();
+    cols.forEach((x, i) => (i ? ctx.lineTo(x, crest(x, i)) : ctx.moveTo(x, crest(x, i))));
+    for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i], footY(cols[i]));
+    ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+
+    // lit crest, and clods along it
+    ctx.fillStyle = 'rgba(255,244,214,0.13)';
+    ctx.beginPath();
+    cols.forEach((x, i) => (i ? ctx.lineTo(x, crest(x, i)) : ctx.moveTo(x, crest(x, i))));
+    for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i], crest(cols[i], i) + 2.6 * dep);
+    ctx.closePath(); ctx.fill();
+    for (let i = 0; i < cols.length; i += 3) {
+      const x = cols[i], j = jit[i];
+      if (j < 0.4 || ease(x) < 0.5) continue;
+      const r = (2 + j * 3) * dep;
+      ctx.fillStyle = j > 0.72 ? 'rgba(0,0,0,0.15)' : 'rgba(255,244,214,0.08)';
       ctx.beginPath();
-      cols.forEach((x, i) => (i ? ctx.lineTo(x, top(x, i) + lift)
-                                : ctx.moveTo(x, top(x, i) + lift)));
-      for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i], foot(cols[i]));
-      ctx.closePath();
-      ctx.fillStyle = fill; ctx.fill();
-    };
-    band(EARTH_LIP, 0);
-    band('rgba(255,244,214,0.10)', 0);          // light catching the crest
-    band(EARTH_LIP, 2.6 * dep);                 // ...only the top 2.6px of it
-    /* CLODS. At desktop scale the bank was a smooth lens — a pebble, not spoil.
-     * A handful of turned-over lumps along the crest is what earth thrown out of
-     * a hole actually looks like, and it is the cheapest way to stop a large
-     * flat fill reading as a single moulded object. */
-    for (let k = 0; k < cols.length; k += 3) {
-      const x = cols[k], j = jit[k];
-      if (j < 0.34) continue;
-      const r = (2.2 + j * 3.4) * dep;
-      ctx.fillStyle = j > 0.72 ? 'rgba(0,0,0,0.16)' : 'rgba(255,244,214,0.09)';
-      ctx.beginPath();
-      ctx.ellipse(x, top(x, k) + (2 + j * 5) * dep, r, r * 0.62, 0, 0, 7);
+      ctx.ellipse(x, crest(x, i) + (2 + j * 4) * dep, r, r * 0.6, 0, 0, 7);
       ctx.fill();
     }
-    // the bank falls away into shadow toward the camera
-    ctx.fillStyle = 'rgba(0,0,0,0.26)';
-    ctx.beginPath();
-    cols.forEach((x, i) => (i ? ctx.lineTo(x, gy(x) + BOOT * 0.42)
-                              : ctx.moveTo(x, gy(x) + BOOT * 0.42)));
-    for (let i = cols.length - 1; i >= 0; i--) ctx.lineTo(cols[i], foot(cols[i]));
-    ctx.closePath(); ctx.fill();
-    // sandbags revetting the lip — two or three, not a neat row
+    // sandbags revetting the lip
     if (typeof Props !== 'undefined' && Props.ready && Props.has('sandbags_row')) {
       const n = c.w > 80 ? 3 : 2;
       for (let i = 0; i < n; i++) {
-        // spaced across the COVER, not the padded art span
-        const x = c.x - c.w / 2 + c.w * ((i + 0.5) / n) + (jit[i] - 0.5) * 10;
-        Props.draw(ctx, 'sandbags_row', x, top(x, i) + 3 * dep, 1,
-                   { flip: jit[i] < 0.5, fit: 10 * dep });
+        const x = in0 + c.w * ((i + 0.5) / n) + (jit[i] - 0.5) * 10;
+        Props.draw(ctx, 'sandbags_row', x, crest(x, i) + 3 * dep, 1,
+                   { flip: jit[i] < 0.5, fit: 9 * dep });
       }
     }
+    ctx.restore();
+  },
+
+  /* WHERE THE LEVER IS, in world space. One definition, used by the drawing
+   * and by the hit test, so the thing you tap is the thing you see. */
+  leverPoint(map, lane, c) {
+    const dep = LANE_DEPTH[lane];
+    const x = c.x + c.w / 2 + 13 * dep;
+    return { x, y: groundY(map, lane, x) + this._trenchFoot(lane) - 30 * dep, r: 17 * dep };
+  },
+
+  /* THE LEVER.
+   *
+   * Warfare 1917's trenches hold their garrison until you decide otherwise, and
+   * can be set so troops skip them and keep going. That is the control this
+   * draws: a post on the parapet with an arm you throw. Down is HOLD — the men
+   * stay until told. Up is OVER THE TOP — they climb out and go on, and nobody
+   * new settles in.
+   *
+   * It lives on the position rather than in the HUD because that is where the
+   * decision is: you are looking at the trench when you decide to empty it. */
+  _drawLever(ctx, game, lane, c, time) {
+    const dep = LANE_DEPTH[lane];
+    const P = this.leverPoint(game.map, lane, c);
+    const over = c.lever === 'over';
+    // the arm eases between the two positions rather than snapping
+    const sw = c.leverT > 0 ? c.leverT / 0.35 : 0;
+    const aim = over ? -1 : 1;
+    const ang = aim * (0.85 - 0.55 * sw) * -1;
+    const post = 15 * dep;
+    ctx.save();
+    ctx.translate(P.x, P.y + post);
+    ctx.lineCap = 'round';
+    // post
+    ctx.strokeStyle = 'rgba(28,22,14,0.9)';
+    ctx.lineWidth = 2.6 * dep;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -post); ctx.stroke();
+    // arm
+    const col = over ? '#e08767' : '#b5c98f';
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2.4 * dep;
+    ctx.beginPath();
+    ctx.moveTo(0, -post);
+    ctx.lineTo(Math.cos(ang) * 11 * dep, -post + Math.sin(ang) * 11 * dep);
+    ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(Math.cos(ang) * 11 * dep, -post + Math.sin(ang) * 11 * dep, 2.6 * dep, 0, 7);
+    ctx.fill();
+    // a manned position with the lever down gets a soft pulse, so a held
+    // garrison is visible at a glance
+    if (!over && c.occ.length) {
+      const pl = 0.25 + 0.18 * Math.sin(time * 3);
+      ctx.strokeStyle = `rgba(181,201,143,${pl})`;
+      ctx.lineWidth = 1.1 * dep;
+      ctx.beginPath(); ctx.arc(0, -post, 7 * dep, 0, 7); ctx.stroke();
+    }
+    ctx.restore();
   },
 
   /* Cover drawn IN FRONT of the men. See _trenchArt for why this pass exists:
@@ -3858,7 +3896,6 @@ const Renderer = {
     for (const c of game.covers[lane]) {
       if (!Camera.sees(c.x, c.w + 50)) continue;
       if (c.type === 'trench' || c.type === 'trenchlong') {
-        this._trenchArt(ctx, map, lane, c, true);
         /* A TRENCH CONCEALS WHAT IS IN IT.
          *
          * Men in a dug position are in shadow under the lip, and from any
@@ -3872,13 +3909,22 @@ const Renderer = {
          * the parapet where the body is, thinning toward the top so helmets and
          * muzzle flashes still carry. You always know the trench is manned; you
          * cannot count them until you look. */
-        const want = (sel && c.occ.indexOf(sel) >= 0) ? 0 : 1;
+        /* Selecting a squad CUTS THE TRENCH AWAY.
+         *
+         * Unselected, the near parapet is solid and the men behind it are down
+         * in the cut — you see helmets and a firing line, not four riflemen on
+         * a lawn, which is what a trench looks like from in front. Select the
+         * squad holding it and the bank fades to a cutaway so you can see who
+         * is actually in there and how full it is. */
+        const want = (sel && c.occ.indexOf(sel) >= 0) ? 1 : 0;
         /* Eased per FRAME, not per second. Deriving a dt from the `time` the
          * renderer is handed made this hostage to which clock the caller passes
          * — the first version moved by one step per frame in the live loop and
          * not at all in a paused capture. 0.18 is ~90% in twelve frames either
          * way, which is what a reveal should feel like. */
         c._veil = c._veil == null ? want : c._veil + (want - c._veil) * 0.18;
+        this._trenchArt(ctx, map, lane, c, true, c._veil);
+        this._drawLever(ctx, game, lane, c, time);
       } else if (c.type === 'rock') {
         /* THE SAME BOULDER AGAIN, clipped to its bottom.
          *
@@ -4869,11 +4915,17 @@ const Renderer = {
        * the scene. Dimming the men themselves has no edges to give away.
        *
        * The dead are never hidden. A body does not keep its head down. */
-      const dug = u.deadT == null && u.squad && u.squad.inCover && u.squad.cover &&
-        (u.squad.cover.type === 'trench' || u.squad.cover.type === 'trenchlong');
-      const hide = dug ? (u.squad.cover._veil != null ? u.squad.cover._veil : 1) : 0;
-      const alpha = (concealed && u.side === game.player ? 0.55 : 1) *
-        Math.min(1, vis) * (1 - 0.6 * hide);
+      /* Men in a trench are DOWN IN IT, not dimmed on top of it.
+       *
+       * The first version faded them out to suggest concealment. That was
+       * solving the right problem the wrong way — what hides a man in a trench
+       * is the earth in front of him, so now he is drawn sunk into the cut and
+       * the parapet does the hiding. No alpha trickery, and it survives the
+       * cutaway: fade the bank and he is simply there, standing in a hole. */
+      const cvr = u.squad && u.squad.inCover ? u.squad.cover : null;
+      const dug = u.deadT == null && cvr &&
+        (cvr.type === 'trench' || cvr.type === 'trenchlong');
+      const alpha = (concealed && u.side === game.player ? 0.55 : 1) * Math.min(1, vis);
       // stance is decided by the squad-level state machine, nowhere else
       const pose = u.pose;
       // snipers on a tower platform stand above the ground line
@@ -4917,7 +4969,9 @@ const Renderer = {
         ? Math.min(1, (u.muzzleT || 0) / 0.11) * 3.0 * scale : 0;
       drawSoldier(ctx, u.key, {
         // `jolt` rocks an armoured hull away from a warhead strike
-        x: u.x - u.dir * rk + (u.jolt || 0), y: u.y + (u.yj || 0) - towerLift + proneDrop - rk * 0.35,
+        x: u.x - u.dir * rk + (u.jolt || 0),
+        y: u.y + (u.yj || 0) - towerLift + proneDrop - rk * 0.35 +
+           (dug ? this.TRENCH_SINK * LANE_DEPTH[lane] : 0),
         dir: u.dir, scale,
         // debounced (see MOVE_HOLD) — the raw flag flickers sub-100ms and that
         // reached the screen as clip thrash

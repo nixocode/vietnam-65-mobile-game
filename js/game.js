@@ -53,6 +53,7 @@ const COVER = {
   DIG_TIME:    13,     // seconds of holding still to fully improve a position
   DIG_MAX:     0.15,   // protection a fully improved position adds
   PROT_CAP:    0.82,
+  DUG_CAP:     0.93,   // a dug position out-protects anything else on the map
   /* Timed against DIG_TIME, not picked in isolation.
    *
    * At 17s the ranging round landed four seconds after the position finished
@@ -441,12 +442,11 @@ class Game {
       if (Math.abs(nx - bestX) > 90) emplace(lane, nx, 'mgnest');
     }
 
-    // TRENCH LINES astride every objective — the ground both sides must fight for
-    for (let lane = 0; lane < LANE_N; lane++) {
-      const fx = this.flags[lane].x;
-      this.addCover(lane, fx - 96, 'trench', true);
-      this.addCover(lane, fx + 96, 'trench', true);
-    }
+    /* Trenches are placed in ONE pass, by _genTrenches. There used to be a
+     * separate block here dropping two of them at flagX +/- 96 before the
+     * scored pass ran, which meant the objective got a pair 192px apart on
+     * whatever ground happened to be there, and they then blocked the scored
+     * pass from putting a long trench anywhere near the flag. */
 
     // VC JUNGLE HIDES: firing positions inside the brush. VC only, and they keep
     // their concealment while occupied, so the ambush doctrine has real estate.
@@ -515,55 +515,94 @@ class Game {
     this._genRocks();
   }
 
-  /* Four dug positions per lane, and at least one that holds three squads.
+  /* WHERE A TRENCH GOES — and whether the map wants one at all.
    *
-   * The first pass took a fixed list of spots and simply SKIPPED any that a
-   * settlement was standing on, then topped the count back up with plain short
-   * trenches. Measured on Ia Drang that produced eleven trenches and not one
-   * long trench on the whole map — so the crowd-three-squads decision, which is
-   * the centre of the system, could never come up. A blocked slot now slides
-   * along the lane instead of being abandoned, and a lane that still ends up
-   * without a long trench gets one forced in. */
+   * Budgets are PER MAP, not per lane, and they are a ceiling rather than a
+   * quota: a position is only cut where the ground actually suits it. Jamming
+   * one onto a slope to hit a number looks exactly as bad as it sounds, so the
+   * flatness gate is allowed to return fewer than the budget — including none.
+   *
+   *   khesanh  5   a dug firebase. Being entrenched IS the place.
+   *   hill937  3   the NVA held that slope from prepared positions.
+   *   iadrang  2   hasty positions scraped around the landing zone.
+   *   mekong   1   one bunded position on a dike at most — you do not cut a
+   *               trench into a paddy, the water table is six inches down.
+   *   cuchi    0   they went DOWN, not across. Tunnels and spider holes are
+   *               that map's identity and it already has both.
+   *
+   * Candidates are scored across BOTH lanes and the best are taken globally, so
+   * the distribution is uneven on purpose — a map can put two on one lane and
+   * none on the other if that is where the ground is.
+   */
   _genTrenches() {
-    const rng = seeded(this.map.seed + 4271);
+    const BUDGET = { khesanh: 5, hill937: 3, iadrang: 2, mekong: 1, cuchi: 0 };
+    const budget = BUDGET[this.map.id] != null ? BUDGET[this.map.id] : 2;
+    if (budget <= 0) return;
+    const SPACING = 420;          // they are landmarks, so keep them apart
+    const MAX_FALL = 13;          // px of drop across a long trench. The gate.
+
+    const cand = [];
     for (let lane = 0; lane < LANE_N; lane++) {
-      const want = [
-        { at: 0.255, type: 'trench' },
-        { at: 0.395, type: 'trenchlong' },
-        { at: 0.535, type: 'trench' },
-        { at: 0.675, type: 'trenchlong' },
-        { at: 0.815, type: 'trench' },
-      ];
-      let made = 0, longs = 0;
-      for (const w of want) {
-        for (let k = 0; k < 8; k++) {
-          // k=0 is the spot itself; after that, step outward in both directions
-          const off = k === 0 ? (rng() - 0.5) * 0.03
-                              : (k % 2 ? 1 : -1) * 0.028 * Math.ceil(k / 2);
-          const x = WORLD_W * (w.at + off);
-          if (!this._trenchSpotOk(lane, x)) continue;
-          if (this.addCover(lane, x, w.type, true, 96)) {
-            made++; if (w.type === 'trenchlong') longs++;
-            break;
-          }
-        }
-      }
-      let guard = 0;
-      while ((made < 4 || longs < 1) && guard++ < 60) {
-        const x = WORLD_W * (0.20 + rng() * 0.64);
-        if (!this._trenchSpotOk(lane, x)) continue;
-        const t = longs < 1 ? 'trenchlong' : 'trench';
-        if (this.addCover(lane, x, t, true, 96)) {
-          made++; if (t === 'trenchlong') longs++;
-        }
+      const flagX = this.flags[lane].x;
+      for (let x = WORLD_W * 0.16; x <= WORLD_W * 0.86; x += 20) {
+        if (this.structures.some(st => st.lane === lane &&
+            Math.abs(st.x - x) < st.w * 0.5 + 80)) continue;
+        const fall = Math.abs(groundY(this.map, lane, x - 55) -
+                              groundY(this.map, lane, x + 55));
+        if (fall > MAX_FALL) continue;            // not ground you dig across
+        const flat = 1 - fall / MAX_FALL;
+        const high = elevAt(this.map, lane, x);
+        const nearFlag = Math.max(0, 1 - Math.abs(x - flagX) / 520);
+        const middle = 1 - Math.abs(x - WORLD_W / 2) / (WORLD_W / 2);
+        cand.push({ lane, x, score: flat * 1.8 + high * 0.9 + nearFlag * 1.4 + middle * 0.5 });
       }
     }
-  }
+    cand.sort((a, b) => b.score - a.score);
 
-  _trenchSpotOk(lane, x) {
-    if (x < 140 || x > WORLD_W - 140) return false;
-    return !this.structures.some(st =>
-      st.lane === lane && Math.abs(st.x - x) < st.w * 0.5 + 70);
+    /* Positions already on the board count against the budget.
+     *
+     * Khe Sanh and Hill 937 cut a trench for each pre-placed defender before
+     * this runs — which is right, a garrison is dug in — but those were not
+     * counted, so Khe Sanh came out with seven when its budget said five. They
+     * also seed the spacing, so the scored pass does not drop one on top of the
+     * garrison line. */
+    const taken = [], used = new Set();
+    let made = 0, longs = 0;
+    for (let lane = 0; lane < LANE_N; lane++) {
+      for (const c of this.covers[lane]) {
+        if (c.type !== 'trench' && c.type !== 'trenchlong') continue;
+        taken.push({ lane, x: c.x });
+        made++; if (c.type === 'trenchlong') longs++;
+      }
+    }
+    if (made >= budget) return;
+    const key = q => q.lane + ':' + q.x;
+    const place = (type, gap, spacing, pool) => {
+      const pick = pool.find(q => !used.has(key(q)) &&
+        !taken.some(t => t.lane === q.lane && Math.abs(t.x - q.x) < spacing));
+      if (!pick) return false;
+      used.add(key(pick));
+      if (!this.addCover(pick.lane, pick.x, type, true, gap)) return false;
+      taken.push(pick);
+      made++; if (type === 'trenchlong') longs++;
+      return true;
+    };
+
+    // the first one is the LONG one and it wants the objective: the flag is
+    // where crowding is most tempting and most punished
+    const atFlag = cand.filter(q => Math.abs(q.x - this.flags[q.lane].x) < 320);
+    for (let i = 0; i < 8 && longs < 1; i++) if (place('trenchlong', 110, 0, atFlag)) break;
+    for (let i = 0; i < 8 && longs < 1; i++) if (place('trenchlong', 110, 0, cand)) break;
+
+    // a second long one only on a map dug in enough to earn it
+    if (budget >= 4) for (let i = 0; i < 8 && longs < 2; i++) {
+      if (place('trenchlong', 110, SPACING, cand)) break;
+    }
+    let guard = 0;
+    while (made < budget && guard++ < 80) {
+      const relax = SPACING * (1 - Math.min(0.5, guard * 0.012));
+      place('trench', 100, relax, cand);
+    }
   }
 
   /* Rocks, placed rather than left to the scatter.
@@ -595,9 +634,12 @@ class Game {
       sandbag: { w: 34, prot: 0.5 },
       dike:    { w: 38, prot: 0.45 },
       crater:  { w: 36, prot: 0.38 },
-      // the two positions worth crowding — everything else holds one squad
-      trench:  { w: 62,  prot: 0.6,  cap: 2 },
-      trenchlong: { w: 108, prot: 0.62, cap: 3 },
+      /* The two positions worth crowding — and the only cover that is properly
+       * lethal to be caught in front of. A log or a rock is somewhere to lie
+       * down; a trench is a position, and a squad in one fighting a squad in
+       * the open should not be a fair fight. */
+      trench:  { w: 62,  prot: 0.78, cap: 2, dug: true },
+      trenchlong: { w: 108, prot: 0.80, cap: 3, dug: true },
       rubble:  { w: 40, prot: 0.5 },
       wall:    { w: 36, prot: 0.5 },
       towerpos:{ w: 30, prot: 0.45, classReq: 'sniper' },
@@ -621,7 +663,17 @@ class Game {
     const spot = {
       lane, x, w: type === 'rubble' ? Math.max(40, d.w) : d.w, type, prot: d.prot,
       occ: [], cap: d.cap || 1, dyn: !static_, lift: 0,
+      /* THE LEVER, on dug positions only.
+       *
+       * Lifted from Warfare 1917, which the owner asked for by name: a trench
+       * holds its garrison until you decide otherwise, and can be set to send
+       * them over the top. Without it "take cover" is a one-way trip — troops
+       * drift out on their own timer and the player never actually commands the
+       * position. `hold` keeps them in; `over` puts them over the parapet and
+       * stops fresh squads settling there. */
+      lever: (type === 'trench' || type === 'trenchlong') ? 'hold' : null,
       classReq: d.classReq || null, sideReq: d.sideReq || null, conceals: !!d.conceals,
+      dug: !!d.dug,
     };
     lc.push(spot);
     return spot;
@@ -636,6 +688,9 @@ class Game {
 
   coverRoom(c, s) {
     if (!c) return false;
+    // a thrown lever means "keep moving" — see toggleLever
+    if (c.lever === 'over' && s && s.side === this.player &&
+        c.occ.indexOf(s) < 0) return false;
     return c.occ.length < c.cap || c.occ.indexOf(s) >= 0;
   }
 
@@ -675,7 +730,31 @@ class Game {
     if (s && s.entrenchT > 0) {
       p += COVER.DIG_MAX * Math.min(1, s.entrenchT / COVER.DIG_TIME);
     }
-    return clamp(p, 0, COVER.PROT_CAP);
+    return clamp(p, 0, c.dug ? COVER.DUG_CAP : COVER.PROT_CAP);
+  }
+
+  /* Throw the lever. Returns the new state, or null if this position has none. */
+  toggleLever(c) {
+    if (!c || !c.lever) return null;
+    c.lever = c.lever === 'hold' ? 'over' : 'hold';
+    c.leverT = 0.35;                       // the arm swings rather than snapping
+    Sound.click();
+    if (c.lever === 'over') {
+      const n = c.occ.filter(s => s.side === this.player).length;
+      if (n) this.emit(`OVER THE TOP — LANE ${c.lane + 1}`, this.player);
+    }
+    return c.lever;
+  }
+
+  /* Does the lever hold this squad in place? Player squads only.
+   *
+   * The lever is an ORDER to your own men, not a gate in the ground — an AI
+   * squad has its own reasons for being in a hole and its own reasons to leave
+   * (see the ranged-in reaction), and letting the player's lever govern them
+   * would either freeze the enemy in place or hand the player a switch that
+   * empties their positions. */
+  leverHolds(s) {
+    return !!(s && s.side === this.player && s.cover && s.cover.lever === 'hold');
   }
 
   squadFitsCover(s, c) {
@@ -876,7 +955,7 @@ class Game {
       } else if (s.order === 'holdcover') {
         // a squad on ADVANCE orders pushes on once the shooting stops; only an
         // explicit player HOLD keeps it in the hole
-        if (s.underFireT <= 0 && !engaged && !s.playerHeld) {
+        if (s.underFireT <= 0 && !engaged && !s.playerHeld && !this.leverHolds(s)) {
           s.quietT += dt;
           if (s.quietT > 2.6) {
             this.coverLeave(s);
@@ -940,6 +1019,14 @@ class Game {
       }
       s._advancing = Math.abs(s.x - xBefore) > 0.01;
       this._updateCoverClock(s, dt, Math.abs(s.x - xBefore) > 0.6);
+
+      /* OVER THE TOP. The lever is thrown, so the garrison climbs out and goes
+       * on — the one order that empties a position on purpose. */
+      if (s.side === this.player && s.inCover && s.cover && s.cover.lever === 'over') {
+        this.coverLeave(s);
+        s.coverCd = 2.2;                  // not straight back into the same hole
+        s.hold = false; s.playerHeld = false; s.order = 'advance';
+      }
 
       // stance state machine — ONE owner, with commitment so nobody yo-yos.
       // A man stays prone ≥2.4s and standing ≥1.1s before he may switch.
@@ -1140,6 +1227,12 @@ class Game {
    * The fire needs an observer. A squad dug in somewhere the enemy cannot see
    * is not being ranged by anybody, and shelling it anyway would punish good
    * positioning instead of rewarding it. */
+  _updateLevers(dt) {
+    for (const lane of this.covers) {
+      for (const c of lane) if (c.leverT > 0) c.leverT = Math.max(0, c.leverT - dt);
+    }
+  }
+
   _updateCoverClock(s, dt, moved) {
     if (!s.inCover || moved) {
       if (s.rangedIn && s.cover) this.emit(`FIRE BROKEN — LANE ${s.lane + 1}`, s.side);
@@ -1646,6 +1739,7 @@ class Game {
     }
 
     this._spottingPass(dt);
+    this._updateLevers(dt);
     this._updateSquads(dt);
     this._updateUnits(dt);
     this._separate(dt);        // keep converging squads from standing inside each other
@@ -1861,7 +1955,22 @@ class Game {
     if (rawProt && typeof Perks !== 'undefined' && Perks.on(this, t.side, 'entrench')) {
       rawProt = Math.min(0.82, rawProt * 1.28);
     }
-    const coverMult = 1 - rawProt * (0.34 + 0.46 * (1 - closeK));
+    /* A DUG POSITION GETS ITS OWN CURVE.
+     *
+     * The shared one tops out at 0.34 + 0.46 = 0.80 of the protection value, so
+     * a trench reading 0.77 delivered — measured, both squads immortal and
+     * pinned at 150px for 25s — a 28% damage reduction. That is not a position,
+     * it is a slightly better patch of grass, and it is why a dug-in squad was
+     * losing to one in the open.
+     *
+     * Dug positions run 0.42 -> 0.94 instead. At range that is near-total: a
+     * squad in the open attacking a trench frontally should be destroyed, which
+     * is the whole reason trenches were dug. Up close it falls away hard, so
+     * the counters still work — close the distance, or use the things that
+     * ignore cover entirely: grenades, rockets, and shells. */
+    const dugIn = t.squad && t.squad.cover && t.squad.cover.dug;
+    const near = dugIn ? 0.52 : 0.34, span = dugIn ? 0.46 : 0.46;
+    const coverMult = 1 - rawProt * (near + span * (1 - closeK));
     const vet = u.squad ? RANKS[u.squad.rank || 0].acc : 1;
     const hit = Math.random() <
       d.acc * vet * (1 + 0.7 * closeK) * (suppressed ? 0.7 : 1) * coverMult;
