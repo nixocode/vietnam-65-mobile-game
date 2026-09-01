@@ -4143,6 +4143,56 @@ const Renderer = {
    * deliberately NOT limited to the selected squad: it is the cue to move, and
    * a cue you only see when you happen to have that squad selected is not a
    * cue. */
+  /* WHERE THE ENEMY IS STACKED UP.
+   *
+   * The whole crowding trade is that massing wins the firefight and loses to
+   * one shell — but occupancy was only ever drawn on the player's OWN
+   * positions, and then only while a squad was selected. So the single most
+   * valuable target on the board, three enemy squads packed into one trench
+   * taking 2.3x blast damage each, was invisible at exactly the moment you
+   * would decide whether to spend a grenade or a fire mission on it.
+   *
+   * Shown only when a position is genuinely CROWDED (two or more squads).
+   * A single squad in cover is the normal state of the game and marking every
+   * one of them would be wallpaper. It is also gated on the occupants being
+   * visible: a marker floating over concealed men would hand the player
+   * through the concealment system rather than around it.
+   */
+  _drawEnemyCrowding(ctx, game, lane, time) {
+    const foe = game.player === 'us' ? 'vc' : 'us';
+    for (const c of game.covers[lane]) {
+      if (c.occ.length < 2) continue;
+      if (!Camera.sees(c.x, c.w + 40)) continue;
+      if (!c.occ.every(s => s.side === foe)) continue;
+      // at least one man actually on show — see the concealment pass
+      const seen = c.occ.some(s => game.squadAlive(s).some(u =>
+        (u.visA != null ? u.visA : 1) > 0.5 && !game.isConcealed(u)));
+      if (!seen) continue;
+
+      const cy = groundY(game.map, lane, c.x);
+      const full = c.occ.length >= c.cap;
+      // a full position is the one worth a shell, so only that one pulses
+      const a = full ? 0.5 + 0.28 * Math.sin(time * 4) : 0.46;
+      const col = `rgba(226,124,92,${a})`;
+      ctx.save();
+      ctx.strokeStyle = col;
+      ctx.setLineDash([2, 5]);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(c.x, cy + 1, c.w / 2 + 5, 4.4, 0, 0, 7);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const gap = 6, x0 = c.x - (c.cap - 1) * gap / 2;
+      for (let i = 0; i < c.cap; i++) {
+        ctx.beginPath();
+        ctx.arc(x0 + i * gap, cy + 9, 2.1, 0, 7);
+        if (i < c.occ.length) { ctx.fillStyle = col; ctx.fill(); }
+        else { ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.stroke(); }
+      }
+      ctx.restore();
+    }
+  },
+
   _drawCoverClock(ctx, game, lane, time) {
     for (const s of game.squads) {
       if (s.lane !== lane || s.side !== game.player || !s.inCover || !s.cover) continue;
@@ -4177,6 +4227,7 @@ const Renderer = {
     const ui = this._ui;
     const sel = ui && ui.selectedSquad;
     this._drawCoverClock(ctx, game, lane, time);
+    this._drawEnemyCrowding(ctx, game, lane, time);
     // selected squad: rings under the men, free cover spots hinted downfield
     if (sel && sel.lane === lane && game.squadAlive(sel).length) {
       ctx.save();
