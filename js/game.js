@@ -54,6 +54,7 @@ const COVER = {
   DIG_MAX:     0.15,   // protection a fully improved position adds
   PROT_CAP:    0.82,
   DUG_CAP:     0.93,   // a dug position out-protects anything else on the map
+  DUG_BLAST:   1.6,    // ...and is the worst place on the map to be shelled
   /* Timed against DIG_TIME, not picked in isolation.
    *
    * At 17s the ranging round landed four seconds after the position finished
@@ -2763,10 +2764,29 @@ class Game {
       const dist = Math.abs(u.x - x);
       if (dist > r) continue;
       let k = 1 - 0.6 * (dist / r);
-      // cover helps a little against blast — most of its value is vs small arms
       if (u.squad && u.squad.inCover && u.squad.cover) {
         const c = u.squad.cover;
-        k *= 1 - this.coverProt(c, u.squad) * 0.3;
+        if (c.dug) {
+          /* A TRENCH DOES NOT SHELTER YOU FROM A SHELL. IT CONTAINS IT.
+           *
+           * Rifle fire cannot touch a dug-in squad — measured, 60-73% of the
+           * damage removed, and a squad that loses 0/8 in the open wins 8/8
+           * from the trench. Something has to answer that, or the position is
+           * simply the winner of the lane, and the answer is the one every army
+           * that met a trench line arrived at: you do not shoot men out of a
+           * hole, you drop explosive into it.
+           *
+           * So blast is AMPLIFIED against a dug position rather than reduced.
+           * The walls that stop bullets are the same walls that stop the blast
+           * wave escaping, which is why a grenade in a trench is so much worse
+           * than a grenade in a field. Grenades, artillery, napalm, satchels
+           * and rockets all arrive through here, so all of them become the
+           * antidote at once. */
+          k *= COVER.DUG_BLAST;
+        } else {
+          // ordinary cover does shield you a little, even from blast
+          k *= 1 - this.coverProt(c, u.squad) * 0.3;
+        }
         /* And this is the other half of the crowding bargain. Two squads packed
          * into one trench are hard to shift with rifles and catastrophic to
          * catch with a single shell — which is exactly the choice the player is
