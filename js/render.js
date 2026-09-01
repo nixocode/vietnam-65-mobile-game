@@ -422,8 +422,15 @@ function muzzlePoint(u) {
   const laneS = LANE_DEPTH[u.lane];
   const scale = laneS * (u.sj || 1);
   const cvm = u.squad && u.squad.inCover ? u.squad.cover : null;
+  /* A man down in a trench is DRAWN lower (see TRENCH_SINK in _drawUnits), so
+   * his barrel is lower too. Without this the muzzle flash, the ejected
+   * casings and the tracer origin all came off the un-sunk standing height —
+   * about a helmet above the rifle — which is glaring in the cutaway view the
+   * sink exists to make readable. Folded into `lift` because every branch
+   * below already subtracts it. */
   const lift = cvm
-    ? (cvm.type === 'towerpos' ? 30 : (cvm.lift || 0)) * laneS
+    ? (cvm.type === 'towerpos' ? 30 : (cvm.lift || 0)) * laneS -
+      (cvm.dug ? Renderer.TRENCH_SINK * laneS : 0)
     : 0;
   if (typeof Sprite3D !== 'undefined' && Sprite3D.enabled && Sprite3D.has(u.key)) {
     // the same state the draw used, so the flash sits on the frame being shown
@@ -3710,13 +3717,25 @@ const Renderer = {
   _trenchArt(ctx, map, lane, c, fore, reveal) {
     const dep = LANE_DEPTH[lane];
     const F = this._trenchFoot(lane);
-    const pad = 20 * dep;
-    const x0 = c.x - c.w / 2 - pad, x1 = c.x + c.w / 2 + pad;
-    const rng = seeded((map.seed + Math.floor(c.x) * 31) >>> 0);
-    const cols = [];
-    for (let x = x0; x <= x1 + 0.01; x += 5) cols.push(x);
-    cols.push(x1);
-    const jit = cols.map(() => rng());
+    /* Built ONCE per position, not twice per frame.
+     *
+     * The span, the sample columns and the per-column jitter all derive from
+     * `c.x`, `c.w` and the lane depth — every one of them constant for the life
+     * of the cover — yet this was reseeding a PRNG and allocating two arrays of
+     * ~30 on every call, and it is called twice per trench per frame (once
+     * behind the men, once in front). Cached on the cover it costs nothing. */
+    let geom = c._geom;
+    if (!geom) {
+      const pad0 = 20 * dep;
+      const gx0 = c.x - c.w / 2 - pad0, gx1 = c.x + c.w / 2 + pad0;
+      const rng = seeded((map.seed + Math.floor(c.x) * 31) >>> 0);
+      const gcols = [];
+      for (let x = gx0; x <= gx1 + 0.01; x += 5) gcols.push(x);
+      gcols.push(gx1);
+      geom = c._geom = { pad: pad0, x0: gx0, x1: gx1, cols: gcols,
+                         jit: gcols.map(() => rng()) };
+    }
+    const pad = geom.pad, x0 = geom.x0, x1 = geom.x1, cols = geom.cols, jit = geom.jit;
     const gy = x => groundY(map, lane, x);
     // 1 across the cover, tapering to 0 through the pads, so both banks die
     // away at their ends instead of being sliced off square
@@ -3833,7 +3852,12 @@ const Renderer = {
   leverPoint(map, lane, c) {
     const dep = LANE_DEPTH[lane];
     const x = c.x + c.w / 2 + 13 * dep;
-    return { x, y: groundY(map, lane, x) + this._trenchFoot(lane) - 30 * dep, r: 17 * dep };
+    /* 26, not 17. The hit box is authored in DESIGN pixels and then shrunk by
+     * --uiK on a phone: at 0.66 a 17px half-extent lands at ~22 device px on
+     * the near lane and ~20 on the far one, against the 44px floor every other
+     * touch control in this game divides the scale back out to reach. The
+     * lever is the newest thing to press and was the hardest. */
+    return { x, y: groundY(map, lane, x) + this._trenchFoot(lane) - 30 * dep, r: 26 * dep };
   },
 
   /* THE LEVER.
@@ -3852,8 +3876,13 @@ const Renderer = {
     const over = c.lever === 'over';
     // the arm eases between the two positions rather than snapping
     const sw = c.leverT > 0 ? c.leverT / 0.35 : 0;
+    /* Blend from the OUTGOING position, or this is a snap with a flourish.
+     * Keying the angle off the new aim alone jumped the arm 68% of its travel
+     * on the first frame and eased only the last third — the opposite of what
+     * the comment above promises. */
     const aim = over ? -1 : 1;
-    const ang = aim * (0.85 - 0.55 * sw) * -1;
+    const prev = c.leverPrev != null ? c.leverPrev : aim;
+    const ang = (aim * (1 - sw) + prev * sw) * -0.85;
     const post = 15 * dep;
     ctx.save();
     ctx.translate(P.x, P.y + post);
@@ -3892,7 +3921,6 @@ const Renderer = {
   _drawCoverFore(ctx, game, lane, time) {
     const map = game.map;
     const dep = LANE_DEPTH[lane];
-    const sel = this._ui && this._ui.selectedSquad;
     for (const c of game.covers[lane]) {
       if (!Camera.sees(c.x, c.w + 50)) continue;
       if (c.type === 'trench' || c.type === 'trenchlong') {

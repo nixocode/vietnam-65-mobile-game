@@ -356,10 +356,21 @@ const UI = {
      * squad to — so without this, throwing the lever would also issue a move
      * order to whatever was selected. */
     if (!this.armedUnit && !this.armedCallin) {
+      /* The hit box is at least a finger wide, whatever the display scale.
+       *
+       * `leverPoint` returns DESIGN pixels, which get shrunk by the display
+       * scale — on a phone that put the target at ~32 device px against the
+       * 44px floor every other touch control in this game reaches. Converting
+       * the floor back into design space here means the drawn lever keeps its
+       * size and only what you can hit grows. */
+      const rect = this.canvas.getBoundingClientRect();
+      const cssPerDesign = Math.max(rect.width / CANVAS_W, rect.height / CANVAS_H) || 1;
+      const minR = 22 / cssPerDesign;
       for (const c of g.covers[lane]) {
         if (!c.lever) continue;
         const P = Renderer.leverPoint(g.map, lane, c);
-        if (Math.abs(P.x - wx) > P.r || Math.abs(P.y - p.y) > P.r) continue;
+        const r = Math.max(P.r, minR);
+        if (Math.abs(P.x - wx) > r || Math.abs(P.y - p.y) > r) continue;
         g.toggleLever(c);
         return;
       }

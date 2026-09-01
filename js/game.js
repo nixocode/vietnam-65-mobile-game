@@ -736,6 +736,7 @@ class Game {
   /* Throw the lever. Returns the new state, or null if this position has none. */
   toggleLever(c) {
     if (!c || !c.lever) return null;
+    c.leverPrev = c.lever === 'hold' ? 1 : -1;   // the outgoing arm position
     c.lever = c.lever === 'hold' ? 'over' : 'hold';
     c.leverT = 0.35;                       // the arm swings rather than snapping
     Sound.click();
@@ -1953,7 +1954,15 @@ class Game {
     let rawProt = (!t.isHole && t.squad && t.squad.inCover && t.squad.cover)
       ? this.coverProt(t.squad.cover, t.squad) : 0;
     if (rawProt && typeof Perks !== 'undefined' && Perks.on(this, t.side, 'entrench')) {
-      rawProt = Math.min(0.82, rawProt * 1.28);
+      /* Cap against the RIGHT ceiling.
+       *
+       * This hardcoded 0.82 was the old universal cap. Dug positions now reach
+       * DUG_CAP, so in a fully-dug trench the entrenching perk was clamping
+       * 0.93 back down to 0.82 — the upgrade actively weakened the one kind of
+       * cover its name refers to, and at range that is a 2.2x swing in how
+       * often the position gets hit. */
+      const cap = t.squad.cover.dug ? COVER.DUG_CAP : COVER.PROT_CAP;
+      rawProt = Math.min(cap, rawProt * 1.28);
     }
     /* A DUG POSITION GETS ITS OWN CURVE.
      *
@@ -1969,8 +1978,9 @@ class Game {
      * the counters still work — close the distance, or use the things that
      * ignore cover entirely: grenades, rockets, and shells. */
     const dugIn = t.squad && t.squad.cover && t.squad.cover.dug;
-    const near = dugIn ? 0.52 : 0.34, span = dugIn ? 0.46 : 0.46;
-    const coverMult = 1 - rawProt * (near + span * (1 - closeK));
+    // only the near end of the curve differs; the span is shared, so say so
+    const near = dugIn ? 0.52 : 0.34;
+    const coverMult = 1 - rawProt * (near + 0.46 * (1 - closeK));
     const vet = u.squad ? RANKS[u.squad.rank || 0].acc : 1;
     const hit = Math.random() <
       d.acc * vet * (1 + 0.7 * closeK) * (suppressed ? 0.7 : 1) * coverMult;
