@@ -218,6 +218,38 @@ const Sound = {
   // but it is listed so _loadSamples fetches it.
   SAMPLES: { m16: 'm16', ak: 'ak', mg: 'mg', bolt: 'bolt' },
 
+  /* EIGHT WEAPON VOICES FROM FOUR RECORDINGS.
+   *
+   * The game had twelve unit types and three gunshots — one line picked between
+   * them by SIDE, so every American weapon was the same crack and every VC
+   * weapon was the same crack. In a firefight that is the difference between
+   * hearing a battle and hearing a loop.
+   *
+   * The four CC0 samples are the only real recordings available (the source
+   * library is gigabytes and no longer on disk — see assets/audio/SOURCE.txt),
+   * so the extra voices are DERIVED rather than downloaded. `_playSample`
+   * already takes a playback rate, and rate plus a different synth bed is
+   * genuinely how these weapons differ: an M14 is the same family of crack as
+   * an M16 an octave down with more body behind it, and an M2 .50 is a much
+   * slower, heavier version of the same belt-gun thump.
+   *
+   *   samp   which recording carries the muzzle
+   *   rate   playback rate — the main character difference
+   *   bed    which synth layer family fills in distance and body
+   *   gain   overall level, so heavier weapons sit louder in the mix
+   *   body   scales the low tail; big cartridges keep rolling
+   */
+  VOICES: {
+    m16:   { samp: 'm16',  rate: 1.00, bed: 'rifle', gain: 1.00, body: 1.00 },
+    m14:   { samp: 'm16',  rate: 0.84, bed: 'rifle', gain: 1.12, body: 1.35 },
+    ak:    { samp: 'ak',   rate: 1.00, bed: 'ak',    gain: 1.00, body: 1.00 },
+    sks:   { samp: 'ak',   rate: 1.14, bed: 'ak',    gain: 0.94, body: 0.85 },
+    mg:    { samp: 'mg',   rate: 1.00, bed: 'mg',    gain: 1.00, body: 1.00 },
+    rpd:   { samp: 'mg',   rate: 1.11, bed: 'mg',    gain: 0.92, body: 0.90 },
+    fifty: { samp: 'mg',   rate: 0.60, bed: 'mg',    gain: 1.40, body: 1.75 },
+    bolt:  { samp: 'bolt', rate: 1.00, bed: 'rifle', gain: 1.06, body: 1.15 },
+  },
+
   _loadSamples() {
     if (this._sampReq || !this.ctx) return;
     this._sampReq = true;
@@ -270,26 +302,30 @@ const Sound = {
      * to the parts that carry DISTANCE. Pitch is jittered per shot so a volley
      * is not one sample stamped twenty times — the single thing that makes
      * sample-based gunfire sound cheap. */
-    const sName = this.SAMPLES[kind];
-    const played = sName && this._playSample(
-      sName, 0.62 * att * (1 - far * 0.45), pan, lag, 0.18 + far * 1.1,
-      j * (1 - far * 0.06));
+    const V = this.VOICES[kind] || this.VOICES.m16;
+    const played = this._playSample(
+      V.samp, 0.62 * V.gain * att * (1 - far * 0.45), pan, lag, 0.18 + far * 1.1,
+      V.rate * j * (1 - far * 0.06));
     const sk = played ? 0.34 : 1;          // synth level once a sample carries it
-    if (kind === 'm16') {
-      this._noise(0.012, 'highpass', H(6200), 1, sk * 0.10 * att * (1 - far), lag, pan, wT);
-      this._noise(0.07, 'bandpass', H(3300 * j), 1.3, sk * 0.17 * att, lag + 0.004, pan, wB);
-      this._noise(0.05, 'highpass', H(5200), 1, sk * 0.07 * att * (1 - far), lag + 0.004, pan, wT);
-      this._noise(0.22 + far * 0.3, 'lowpass', 900 * j, 0.6, 0.06 * att, lag + 0.02, pan, wB);
-    } else if (kind === 'ak') {
-      this._noise(0.012, 'highpass', H(4800), 1, sk * 0.08 * att * (1 - far), lag, pan, wT);
-      this._noise(0.09, 'bandpass', H(1650 * j), 1.1, sk * 0.21 * att, lag + 0.004, pan, wB);
-      this._tone('square', 128 * j, 0.05, sk * 0.05 * att, lag + 0.004, null, pan, wT);
-      this._noise(0.28 + far * 0.34, 'lowpass', 700 * j, 0.6, 0.07 * att, lag + 0.03, pan, wB);
-    } else if (kind === 'mg') {
-      this._noise(0.01, 'highpass', H(5600), 1, sk * 0.07 * att * (1 - far), lag, pan, wT);
-      this._noise(0.06, 'bandpass', H(2050 * j), 1, sk * 0.16 * att, lag + 0.003, pan, wB);
-      this._tone('square', 96 * j, 0.04, sk * 0.045 * att, lag + 0.003, null, pan, wT);
-      this._noise(0.16 + far * 0.3, 'lowpass', 800, 0.6, 0.05 * att, lag + 0.02, pan, wB);
+    const bod = V.body;
+    /* One bed per family instead of a chain of `if (kind === ...)`. The three
+     * beds were already near-copies of each other differing in four numbers;
+     * pulling those out is what lets eight voices share them. */
+    if (V.bed === 'rifle') {
+      this._noise(0.012, 'highpass', H(6200 * V.rate), 1, sk * 0.10 * att * (1 - far), lag, pan, wT);
+      this._noise(0.07, 'bandpass', H(3300 * j * V.rate), 1.3, sk * 0.17 * att, lag + 0.004, pan, wB);
+      this._noise(0.05, 'highpass', H(5200 * V.rate), 1, sk * 0.07 * att * (1 - far), lag + 0.004, pan, wT);
+      this._noise((0.22 + far * 0.3) * bod, 'lowpass', 900 * j * V.rate, 0.6, 0.06 * att * bod, lag + 0.02, pan, wB);
+    } else if (V.bed === 'ak') {
+      this._noise(0.012, 'highpass', H(4800 * V.rate), 1, sk * 0.08 * att * (1 - far), lag, pan, wT);
+      this._noise(0.09, 'bandpass', H(1650 * j * V.rate), 1.1, sk * 0.21 * att, lag + 0.004, pan, wB);
+      this._tone('square', 128 * j * V.rate, 0.05, sk * 0.05 * att, lag + 0.004, null, pan, wT);
+      this._noise((0.28 + far * 0.34) * bod, 'lowpass', 700 * j * V.rate, 0.6, 0.07 * att * bod, lag + 0.03, pan, wB);
+    } else {
+      this._noise(0.01, 'highpass', H(5600 * V.rate), 1, sk * 0.07 * att * (1 - far), lag, pan, wT);
+      this._noise(0.06, 'bandpass', H(2050 * j * V.rate), 1, sk * 0.16 * att, lag + 0.003, pan, wB);
+      this._tone('square', 96 * j * V.rate, 0.04, sk * 0.045 * att, lag + 0.003, null, pan, wT);
+      this._noise((0.16 + far * 0.3) * bod, 'lowpass', 800 * V.rate, 0.6, 0.05 * att * bod, lag + 0.02, pan, wB);
     }
     /* The hand-built treeline slap is GONE. It was one delayed noise burst
      * standing in for a room, and the convolver now returns the whole tail —

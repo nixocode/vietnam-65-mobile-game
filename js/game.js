@@ -1952,7 +1952,9 @@ class Game {
       this.fx.suppressDust(bx, groundY(this.map, u.lane, bx), -u.dir, scale);
       this.fx.sparks(mx + u.dir * 6 * scale, my);
     }
-    else Sound.shot(d.mg ? 'mg' : u.side === 'us' ? 'm16' : 'ak', mx);
+    /* The weapon decides, not the side. This used to be `us ? m16 : ak`, so
+     * twelve unit types shared three gunshots and a firefight was one loop. */
+    else Sound.shot(d.snd || (d.mg ? 'mg' : u.side === 'us' ? 'm16' : 'ak'), mx);
     if (Math.random() < 0.08) this.tryBirds(u.x);
 
     const wasHidden = this.isConcealed(u);

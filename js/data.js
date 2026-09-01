@@ -176,11 +176,11 @@ function engageFrac(u) {
 }
 
 const UNITS = {
-  rifleman: { side: 'us', name: 'Rifleman', sub: 'M16', cost: 10, cd: 4, hp: 55, dmg: 9, rof: 5, burst: [2, 4], pause: [0.9, 1.7], range: 320, speed: 42, acc: 0.4, hat: 'm1' },
-  arvn:     { side: 'us', name: 'ARVN', sub: 'Light Inf.', cost: 7, cd: 2.5, hp: 40, dmg: 7, rof: 4.5, burst: [2, 3], pause: [1.0, 1.8], range: 280, speed: 46, acc: 0.33, hat: 'm1', small: true },
-  m60:      { side: 'us', name: 'M60 Gunner', sub: 'MG', cost: 24, cd: 9, hp: 70, dmg: 6, rof: 9, burst: [6, 11], pause: [1.3, 2.2], range: 380, speed: 32, acc: 0.32, hat: 'm1', mg: true, suppress: true },
-  engineer: { side: 'us', name: 'Engineer', sub: 'Demo', cost: 18, cd: 8, hp: 60, dmg: 8, rof: 4, burst: [1, 3], pause: [1.1, 1.9], range: 230, speed: 37, acc: 0.4, hat: 'm1', engineer: true, pack: true },
-  recon:    { side: 'us', name: 'LRRP Recon', sub: 'Spotter', cost: 16, cd: 10, hp: 45, dmg: 8, rof: 4.5, burst: [2, 3], pause: [0.9, 1.6], range: 340, speed: 48, acc: 0.45, hat: 'boonie', detect: 325, antenna: true },
+  rifleman: { snd: 'm16', side: 'us', name: 'Rifleman', sub: 'M16', cost: 10, cd: 4, hp: 55, dmg: 9, rof: 5, burst: [2, 4], pause: [0.9, 1.7], range: 320, speed: 42, acc: 0.4, hat: 'm1' },
+  arvn:     { snd: 'm14', side: 'us', name: 'ARVN', sub: 'Light Inf.', cost: 7, cd: 2.5, hp: 40, dmg: 7, rof: 4.5, burst: [2, 3], pause: [1.0, 1.8], range: 280, speed: 46, acc: 0.33, hat: 'm1', small: true },
+  m60:      { snd: 'mg', side: 'us', name: 'M60 Gunner', sub: 'MG', cost: 24, cd: 9, hp: 70, dmg: 6, rof: 9, burst: [6, 11], pause: [1.3, 2.2], range: 380, speed: 32, acc: 0.32, hat: 'm1', mg: true, suppress: true },
+  engineer: { snd: 'm16', side: 'us', name: 'Engineer', sub: 'Demo', cost: 18, cd: 8, hp: 60, dmg: 8, rof: 4, burst: [1, 3], pause: [1.1, 1.9], range: 230, speed: 37, acc: 0.4, hat: 'm1', engineer: true, pack: true },
+  recon:    { snd: 'm16', side: 'us', name: 'LRRP Recon', sub: 'Spotter', cost: 16, cd: 10, hp: 45, dmg: 8, rof: 4.5, burst: [2, 3], pause: [0.9, 1.6], range: 340, speed: 48, acc: 0.45, hat: 'boonie', detect: 325, antenna: true },
   /* The sniper is meant to be a threat you solve, not a rifleman with a scope.
    * One shot kills outright (dmg 999 is the sentinel), he reaches half the map,
    * and `farArmour` makes him very hard to answer at distance — see _damage.
@@ -194,14 +194,14 @@ const UNITS = {
      uses to draw a prop instead of a soldier, and which the sim uses to keep it
      off the ground (it never goes prone, dives, or takes a stance). Heavy armour
      against small arms, but a sapper's satchel or a mine kills it outright. */
-  m113:     { side: 'us', name: 'M113 APC', sub: '.50 cal', cost: 0, cd: 0, hp: 260, dmg: 8,
+  m113:     { snd: 'fifty', side: 'us', name: 'M113 APC', sub: '.50 cal', cost: 0, cd: 0, hp: 260, dmg: 8,
               rof: 7.5, burst: [6, 11], pause: [1.3, 2.1], range: 340, speed: 30, acc: 0.34,
               hat: null, mg: true, suppress: true, vehicle: true, prop: 'm113',
               armour: 0.34 },
 
-  guerrilla:{ side: 'vc', name: 'Guerrilla', sub: 'Local Force', cost: 8, cd: 3, hp: 45, dmg: 8, rof: 5, burst: [2, 4], pause: [1.0, 1.9], range: 280, speed: 44, acc: 0.35, hat: 'conical', conceal: true, ambush: 1.6 },
-  nva:      { side: 'vc', name: 'NVA Regular', sub: 'AK-47', cost: 14, cd: 4.5, hp: 60, dmg: 10, rof: 5.5, burst: [2, 5], pause: [0.9, 1.7], range: 310, speed: 40, acc: 0.4, hat: 'pith', conceal: true, ambush: 1.35 },
-  rpd:      { side: 'vc', name: 'RPD Gunner', sub: 'MG', cost: 22, cd: 9, hp: 65, dmg: 6, rof: 8.5, burst: [5, 9], pause: [1.4, 2.3], range: 360, speed: 33, acc: 0.3, hat: 'pith', mg: true, suppress: true },
+  guerrilla:{ snd: 'sks', side: 'vc', name: 'Guerrilla', sub: 'Local Force', cost: 8, cd: 3, hp: 45, dmg: 8, rof: 5, burst: [2, 4], pause: [1.0, 1.9], range: 280, speed: 44, acc: 0.35, hat: 'conical', conceal: true, ambush: 1.6 },
+  nva:      { snd: 'ak', side: 'vc', name: 'NVA Regular', sub: 'AK-47', cost: 14, cd: 4.5, hp: 60, dmg: 10, rof: 5.5, burst: [2, 5], pause: [0.9, 1.7], range: 310, speed: 40, acc: 0.4, hat: 'pith', conceal: true, ambush: 1.35 },
+  rpd:      { snd: 'rpd', side: 'vc', name: 'RPD Gunner', sub: 'MG', cost: 22, cd: 9, hp: 65, dmg: 6, rof: 8.5, burst: [5, 9], pause: [1.4, 2.3], range: 360, speed: 33, acc: 0.3, hat: 'pith', mg: true, suppress: true },
   /* The VC answer to armour. Slow, short-legged and useless in a firefight, but
      its warhead ignores armour — without it the APC could only be killed by a
      sapper closing to satchel range, which is not a counter, it is a hope. */
@@ -209,7 +209,7 @@ const UNITS = {
               rof: 0.42, range: 260, speed: 36, acc: 0.55, hat: 'pith',
               conceal: true, ambush: 1, at: true, blast: 46 },
 
-  sapper:   { side: 'vc', name: 'Sapper', sub: 'Satchel', cost: 20, cd: 10, hp: 55, dmg: 0, rof: 0, range: 38, speed: 56, acc: 1, hat: 'band', sapper: true, conceal: true, ambush: 1 },
+  sapper:   { snd: 'ak', side: 'vc', name: 'Sapper', sub: 'Satchel', cost: 20, cd: 10, hp: 55, dmg: 0, rof: 0, range: 38, speed: 56, acc: 1, hat: 'band', sapper: true, conceal: true, ambush: 1 },
   marksman: { side: 'vc', name: 'Marksman', sub: 'Mosin', cost: 36, cd: 15, hp: 38, dmg: 999, rof: 0.3, range: 780, speed: 31, acc: 0.98, hat: 'conical', sniper: true, aim: 2.9, conceal: true, ambush: 1, farArmour: 0.82 },
 };
 
