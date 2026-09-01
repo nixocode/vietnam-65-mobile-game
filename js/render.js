@@ -4909,7 +4909,8 @@ const Renderer = {
       const rk = (u.muzzleT || 0) > 0
         ? Math.min(1, (u.muzzleT || 0) / 0.11) * 3.0 * scale : 0;
       drawSoldier(ctx, u.key, {
-        x: u.x - u.dir * rk, y: u.y + (u.yj || 0) - towerLift + proneDrop - rk * 0.35,
+        // `jolt` rocks an armoured hull away from a warhead strike
+        x: u.x - u.dir * rk + (u.jolt || 0), y: u.y + (u.yj || 0) - towerLift + proneDrop - rk * 0.35,
         dir: u.dir, scale,
         // debounced (see MOVE_HOLD) — the raw flag flickers sub-100ms and that
         // reached the screen as clip thrash

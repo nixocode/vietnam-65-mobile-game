@@ -1799,7 +1799,22 @@ class Game {
     this.fx.muzzle(mx, my, u.dir, scale, !!d.mg);
     this.fx.casing(u.x + u.dir * 2 * scale, my + 3, u.dir, scale);
     if (u.shots % 4 === 0) this.fx.addDecal(u.lane, u.x - u.dir * 3 + rand(-4, 4), 'casing', 1);
-    if (d.at) Sound.rocket(mx);
+    if (d.at) {
+      Sound.rocket(mx);
+      /* BACKBLAST. A B-40 is a recoilless launcher: everything the rocket does
+       * not push forward goes out of the back of the tube in a cone of dust and
+       * smoke. It is the most recognisable thing about firing one and the game
+       * did not draw it at all — the shot read as a rifle with a loud sound.
+       *
+       * It is also the tell that gives the gunner's position away, which is the
+       * honest reason to draw it: the player should be able to see where the
+       * rocket came from. */
+      const bx = u.x - u.dir * 18 * scale;
+      this.fx.smokePuff(bx, my + 3 * scale);
+      this.fx.smokePuffSmall(bx - u.dir * 12 * scale, my + 6 * scale);
+      this.fx.suppressDust(bx, groundY(this.map, u.lane, bx), -u.dir, scale);
+      this.fx.sparks(mx + u.dir * 6 * scale, my);
+    }
     else Sound.shot(d.mg ? 'mg' : u.side === 'us' ? 'm16' : 'ak', mx);
     if (Math.random() < 0.08) this.tryBirds(u.x);
 
@@ -1850,12 +1865,21 @@ class Game {
         /* A rocket does not "hit a man" — it detonates. Area damage, flagged
          * heavy so armour is no defence, which is the whole reason the weapon
          * exists. */
+        // the rocket's own smoke trail, so the shot has a visible flight path
+        // rather than being a hit that simply happens at the far end
+        const n = 6;
+        for (let i = 1; i <= n; i++) {
+          const k = i / (n + 1);
+          this.fx.smokePuffSmall(mx + (t.x - mx) * k, my + (t.y - 12 - my) * k);
+        }
         this.fx.explosion(t.x, t.y - 10, 46, { shake: 6 });
         this._areaDamage(u.lane, t.x, d.blast || 44, dmg, { side: u.side }, u.side);
         this.fx.punch(0.06, u.dir, -0.2);
       } else {
         this._damage(t, dmg, u);
-        if (!t.isHole) this.fx.blood(t.x, t.y, LANE_DEPTH[t.lane]);
+        // a hull does not bleed — _damage draws the ricochet instead
+        const armoured = !t.isHole && UNITS[t.key] && UNITS[t.key].armour;
+        if (!t.isHole && !armoured) this.fx.blood(t.x, t.y, LANE_DEPTH[t.lane]);
       }
     } else {
       // rounds go long or drop short — visibly
@@ -1912,10 +1936,20 @@ class Game {
     // armour turns rifle fire aside; a satchel, mine or shell goes straight through
     const arm = !t.isHole && UNITS[t.key] && UNITS[t.key].armour;
     if (arm) {
-      // Rifle fire is nearly useless against a hull; a shaped charge is the
-      // opposite. Five satchels to kill made the APC a wall rather than a
-      // decision — two is the trade that keeps sappers relevant.
-      dmg *= opts.heavy ? 2.4 : (1 - arm) * 0.42;
+      /* SMALL ARMS DO NOT KILL ARMOUR. Not "less", none.
+       *
+       * Rifle fire used to do 0.28x, which is not a wall — it is a grind. A
+       * 260 HP hull falls to about a thousand rounds, so the honest answer to
+       * an APC was to keep shooting it, and the RPG gunner and the sapper were
+       * a shortcut rather than the answer. Zero makes the APC a PROBLEM: you
+       * need a shaped charge, a satchel, a grenade or a shell, and if you have
+       * none of those you have to manoeuvre around it.
+       *
+       * The deflection has to be loud, or this reads as a bug rather than as
+       * armour — see _armourDeflect. */
+      if (!opts.heavy) { this._armourDeflect(t, killer); return; }
+      dmg *= 2.4;
+      this._armourImpact(t, killer);
     }
     /* A sniper is very hard to answer at distance.
      *
@@ -1947,6 +1981,50 @@ class Game {
         t.hitT = Math.max(t.hitT || 0, 0.16);
         t.hitCd = 0.62;
       }
+    }
+  }
+
+  /* Rounds coming off a hull. The player must SEE that the bullets are doing
+   * nothing, or zero damage reads as a broken hit test. Rate-limited hard: a
+   * .50 and two rifles on one track would otherwise be a continuous shower of
+   * sparks and a solid tone of ricochets. */
+  _armourDeflect(t, killer) {
+    if ((t.clangCd || 0) > 0) return;
+    t.clangCd = 0.16;
+    const sc = LANE_DEPTH[t.lane];
+    const dir = killer && killer.x != null ? Math.sign(killer.x - t.x) || 1 : 1;
+    const hx = t.x + dir * 14 * sc, hy = t.y - rand(14, 30) * sc;
+    this.fx.sparks(hx, hy);
+    /* The SOUND is thinner than the sparks, on its own clock.
+     *
+     * Measured under two NVA squads' fire: one shared cooldown gave 2.5 sparks
+     * and 2.4 ricochets a second — the sparks read as armour, the ricochets
+     * read as a stuck tone. The eye tolerates a rate the ear does not. */
+    if ((t.clangSndCd || 0) <= 0 && Camera.sees(t.x, 60)) {
+      t.clangSndCd = 0.42;
+      Sound.ricochet(hx);
+    }
+    // and once in a while, say it in words
+    if ((t.clangSayCd || 0) <= 0 && Camera.sees(t.x, 60)) {
+      t.clangSayCd = 4.5;
+      this.fx.floater(t.x, t.y - 44 * sc, 'ARMOUR', '#c9cbb4');
+    }
+  }
+
+  /* A warhead getting through. The blast draws its own explosion at the point
+   * of detonation; this is the hull's reaction to it — a hot spall flash, smoke
+   * off the plate, and the track physically rocking away from the hit. */
+  _armourImpact(t, killer) {
+    const sc = LANE_DEPTH[t.lane];
+    const dir = killer && killer.x != null ? Math.sign(t.x - killer.x) || 1 : 1;
+    t.jolt = Math.min(7, (t.jolt || 0) + 5) * dir;
+    this.fx.sparks(t.x - dir * 10 * sc, t.y - 20 * sc);
+    this.fx.sparks(t.x - dir * 4 * sc, t.y - 30 * sc);
+    this.fx.smokePuff(t.x, t.y - 26 * sc);
+    this.fx.dirtKick(t.x, t.y, sc, true);
+    if (Camera.sees(t.x, 80)) {
+      this.fx.shake = Math.min(14, this.fx.shake + 3);
+      this.fx.floater(t.x, t.y - 52 * sc, 'HULL HIT', '#ffb08a');
     }
   }
 
@@ -2048,6 +2126,14 @@ class Game {
       u.spotT = Math.max(0, u.spotT - dt);
       u.hitT = Math.max(0, (u.hitT || 0) - dt);
       u.hitCd = Math.max(0, (u.hitCd || 0) - dt);
+      u.clangCd = Math.max(0, (u.clangCd || 0) - dt);
+      u.clangSayCd = Math.max(0, (u.clangSayCd || 0) - dt);
+      u.clangSndCd = Math.max(0, (u.clangSndCd || 0) - dt);
+      // the hull rocks back from a warhead and settles
+      if (u.jolt) {
+        u.jolt *= Math.max(0, 1 - dt * 7);
+        if (Math.abs(u.jolt) < 0.05) u.jolt = 0;
+      }
       u.combatT = Math.max(0, (u.combatT || 0) - dt);
       u.transT = Math.max(0, (u.transT || 0) - dt);
 

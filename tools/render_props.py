@@ -318,32 +318,90 @@ def build_watchtower():
 def build_m113():
     """An M113 APC, side on.
 
-    Box geometry failed badly on the watchtower, but that was an OPEN LATTICE —
-    a frame of thin members with air between them. A hull is the opposite case:
-    solid closed volumes, which is exactly what boxes are good at. Sloped glacis,
-    slab sides, track run with road wheels, and the commander's .50 cupola.
+    The first version was boxes in one colour, and at the ~50px it is actually
+    drawn it read as a dark green slab with a staircase on the front. Three
+    things were wrong and all three are about READING at size, not detail:
+
+      - no value separation. Hull, fenders, tracks and glacis were all within a
+        few percent of each other, so there was no silhouette inside the
+        silhouette — nothing to tell you where the vehicle ended and the running
+        gear began.
+      - the glacis was built as five stacked boxes to fake a slope. At size that
+        is a staircase, and a staircase is the one shape armour never has.
+      - the running gear was invisible. A tracked vehicle is read by its track
+        run and road wheels more than by its hull.
+
+    So: a real sloped plate, a track assembly two full values darker than the
+    hull, a lit deck line, and the stowage that makes an APC look used rather
+    than delivered.
     """
-    hull = _pmat('v_hull', (0.088, 0.104, 0.056))
-    dark = _pmat('v_dark', (0.038, 0.044, 0.026))
-    steel = _pmat('v_steel', (0.030, 0.032, 0.034))
-    L, W = 2.45, 1.30                       # half-length, half-width
-    _box(hull, -L, -W, 0.62, L * 0.72, W, 1.70)          # main body
-    # sloped glacis, stepped so it reads as a slope in profile
-    for i in range(5):
-        t0, t1 = i / 5, (i + 1) / 5
-        _box(hull, L * 0.72 + (L * 0.28) * t0, -W, 0.62 + 0.90 * t0,
-             L * 0.72 + (L * 0.28) * t1, W, 0.62 + 0.90 * t1 + 0.22)
-    _box(dark, -L, -W - 0.06, 0.30, L * 0.92, -W + 0.10, 1.02)   # track guards
-    _box(dark, -L, W - 0.10, 0.30, L * 0.92, W + 0.06, 1.02)
-    for sy in (-W - 0.02, W - 0.10):                              # track runs
-        _box(steel, -L * 0.96, sy, 0.10, L * 0.90, sy + 0.12, 0.66)
-        for i in range(5):                                        # road wheels
-            x = -L * 0.80 + i * (L * 1.62 / 4)
-            _box(dark, x - 0.20, sy - 0.03, 0.06, x + 0.20, sy + 0.15, 0.56)
-    _box(hull, -0.55, -0.48, 1.70, 0.35, 0.48, 2.06)              # cupola
-    _box(steel, -0.10, -0.09, 2.06, 0.86, 0.09, 2.20)             # .50 cal
-    _box(dark, -0.34, -0.30, 2.04, 0.02, 0.30, 2.24)              # shield
-    _box(dark, L * 0.55, -0.50, 1.70, L * 0.72, 0.50, 1.84)       # driver hatch
+    hull = _pmat('v_hull', (0.076, 0.088, 0.048))
+    deck = _pmat('v_deck', (0.112, 0.126, 0.070))   # lit top surfaces
+    dark = _pmat('v_dark', (0.026, 0.030, 0.019))   # recesses and shadow
+    steel = _pmat('v_steel', (0.044, 0.046, 0.048))
+    rubber = _pmat('v_rubber', (0.017, 0.017, 0.018))
+    canvas = _pmat('v_canvas', (0.128, 0.106, 0.068))
+
+    L, W = 2.36, 1.30          # half-length, half-width
+    Z0, Z1 = 0.92, 2.02        # hull bottom / top
+
+    # ---- running gear, darkest and read first --------------------------------
+    _poly(dark, [(-L * 0.99, 0.16), (-L * 0.99, 0.86), (L * 0.94, 0.86),
+                 (L * 0.99, 0.52), (L * 0.94, 0.16)], y=0.0, yt=W * 0.80)
+    for sy in (-W * 0.92, W * 0.78):
+        # the track band itself, a shade up from the shadow inside it
+        _box(steel, -L * 0.99, sy, 0.14, L * 0.99, sy + W * 0.14, 0.30)
+        _box(steel, -L * 0.99, sy, 0.74, L * 0.94, sy + W * 0.14, 0.88)
+        # drive sprocket forward, idler aft, five road wheels between
+        for x, r in [(L * 0.86, 0.34), (-L * 0.86, 0.30)]:
+            _box(steel, x - r, sy - 0.02, 0.50 - r, x + r, sy + W * 0.16, 0.50 + r)
+            _box(dark, x - r * 0.4, sy - 0.03, 0.50 - r * 0.4,
+                 x + r * 0.4, sy + W * 0.17, 0.50 + r * 0.4)
+        for i in range(5):
+            x = -L * 0.60 + i * (L * 1.22 / 4)
+            _box(rubber, x - 0.23, sy - 0.02, 0.20, x + 0.23, sy + W * 0.16, 0.78)
+            _box(steel, x - 0.11, sy - 0.03, 0.36, x + 0.11, sy + W * 0.17, 0.62)
+
+    # ---- hull ---------------------------------------------------------------
+    _box(hull, -L, -W, Z0, L * 0.66, W, Z1)
+    # sloped glacis as ONE plate, not a stack of steps
+    _poly(hull, [(L * 0.66, Z0), (L * 0.66, Z1), (L * 1.00, Z1 - 0.34),
+                 (L * 1.00, Z0 - 0.18)], y=0.0, yt=W)
+    # fenders: a lit horizontal that separates hull from track
+    _box(deck, -L, -W - 0.10, Z0 - 0.10, L * 0.99, W + 0.10, Z0 + 0.04)
+    _box(dark, -L, -W - 0.10, Z0 - 0.18, L * 0.99, W + 0.10, Z0 - 0.10)
+    # deck line along the top, so the roof catches light
+    _box(deck, -L, -W, Z1 - 0.09, L * 0.68, W, Z1)
+
+    # ---- fittings -----------------------------------------------------------
+    # trim vane folded flat on the glacis
+    _poly(steel, [(L * 0.70, Z1 - 0.02), (L * 0.99, Z1 - 0.33),
+                  (L * 0.99, Z1 - 0.45), (L * 0.70, Z1 - 0.14)], y=0.0, yt=W * 0.92)
+    # driver's hatch and vision blocks
+    _box(deck, L * 0.30, -0.46, Z1, L * 0.60, 0.46, Z1 + 0.11)
+    _box(dark, L * 0.72, -W - 0.01, Z1 - 0.30, L * 0.86, -W + 0.06, Z1 - 0.18)
+    # commander's cupola, ring and .50
+    _box(hull, -0.62, -0.52, Z1, 0.30, 0.52, Z1 + 0.34)
+    _box(deck, -0.66, -0.56, Z1 + 0.30, 0.34, 0.56, Z1 + 0.40)
+    _box(dark, -0.30, -0.34, Z1 + 0.38, 0.06, 0.34, Z1 + 0.60)   # shield
+    _box(steel, -0.04, -0.055, Z1 + 0.44, 0.92, 0.055, Z1 + 0.55)  # barrel
+    _box(dark, 0.06, -0.08, Z1 + 0.42, 0.30, 0.08, Z1 + 0.58)      # receiver
+    # exhaust down the right side
+    _box(dark, L * 0.10, W - 0.04, Z1 - 0.42, L * 0.62, W + 0.12, Z1 - 0.22)
+    # rear ramp seam
+    _box(dark, -L - 0.02, -W + 0.05, Z0 + 0.10, -L + 0.06, W - 0.05, Z1 - 0.12)
+
+    # ---- stowage: what makes it look used --------------------------------
+    import random as _r
+    _r.seed(97)
+    for i in range(4):
+        x = -L * 0.86 + i * 0.44 + _r.random() * 0.10
+        h = 0.16 + _r.random() * 0.12
+        _box(canvas if i % 2 else deck, x, -0.54, Z1 + 0.02,
+             x + 0.34, 0.54, Z1 + 0.02 + h)
+    _box(canvas, -L * 0.34, -0.60, Z1 + 0.02, -L * 0.02, 0.60, Z1 + 0.26)
+    # a jerrican on the fender
+    _box(dark, -L * 0.72, W - 0.02, Z0 + 0.06, -L * 0.50, W + 0.14, Z0 + 0.42)
 
 
 def build_huey():
