@@ -3896,34 +3896,31 @@ const Renderer = {
     for (const c of game.covers[lane]) {
       if (!Camera.sees(c.x, c.w + 50)) continue;
       if (c.type === 'trench' || c.type === 'trenchlong') {
-        /* A TRENCH CONCEALS WHAT IS IN IT.
+        /* WHO IS INSIDE DECIDES WHETHER YOU CAN SEE INSIDE.
          *
-         * Men in a dug position are in shadow under the lip, and from any
-         * distance you see movement and a helmet rather than four riflemen.
-         * Drawing them at full clarity made every trench on the map read as an
-         * exhibit. So the interior takes a shadow veil that lifts when the
-         * player selects the squad holding it — pick them and they resolve,
-         * leave them and they sink back into the position.
+         * The cutaway used to be gated on SELECTION, which meant you lost sight
+         * of your own men the moment you clicked something else — you had to
+         * keep a squad selected just to keep track of it. Occupancy is the
+         * honest trigger:
          *
-         * The veil is a gradient rather than a flat wash: densest just above
-         * the parapet where the body is, thinning toward the top so helmets and
-         * muzzle flashes still carry. You always know the trench is manned; you
-         * cannot count them until you look. */
-        /* Selecting a squad CUTS THE TRENCH AWAY.
+         *   your men in it   cut away, so you can watch them hold the position
+         *   empty            solid. There is nothing to look at in an empty hole
+         *   enemy in it      solid, ALWAYS. You do not get to look into their
+         *                    trench and count them — the earth is in the way,
+         *                    which is the entire point of digging it.
          *
-         * Unselected, the near parapet is solid and the men behind it are down
-         * in the cut — you see helmets and a firing line, not four riflemen on
-         * a lawn, which is what a trench looks like from in front. Select the
-         * squad holding it and the bank fades to a cutaway so you can see who
-         * is actually in there and how full it is. */
-        const want = (sel && c.occ.indexOf(sel) >= 0) ? 1 : 0;
-        /* Eased per FRAME, not per second. Deriving a dt from the `time` the
-         * renderer is handed made this hostage to which clock the caller passes
-         * — the first version moved by one step per frame in the live loop and
-         * not at all in a paused capture. 0.18 is ~90% in twelve frames either
-         * way, which is what a reveal should feel like. */
-        c._veil = c._veil == null ? want : c._veil + (want - c._veil) * 0.18;
-        this._trenchArt(ctx, map, lane, c, true, c._veil);
+         * Their helmets still show above the parapet, so a manned enemy
+         * position is readable as manned; what you cannot do is take a
+         * headcount. The crowding pips carry the one thing worth knowing about
+         * a packed enemy trench (see _drawEnemyCrowding).
+         *
+         * Eased per FRAME rather than per second: deriving a dt from the `time`
+         * the renderer is handed made this hostage to which clock the caller
+         * passes, and it moved one step per frame in the live loop and not at
+         * all in a paused capture. 0.18 is ~90% in twelve frames either way. */
+        const mine = c.occ.some(s => s.side === game.player) ? 1 : 0;
+        c._reveal = c._reveal == null ? mine : c._reveal + (mine - c._reveal) * 0.18;
+        this._trenchArt(ctx, map, lane, c, true, c._reveal);
         this._drawLever(ctx, game, lane, c, time);
       } else if (c.type === 'rock') {
         /* THE SAME BOULDER AGAIN, clipped to its bottom.
@@ -4908,7 +4905,7 @@ const Renderer = {
        * you read movement and a helmet, not four riflemen. Drawn at full
        * clarity every trench on the map was an exhibit. So occupants sink back
        * until the player selects the squad holding the position, and resolve
-       * when they do — see `_veil` in _drawCoverFore, which owns the easing.
+       * when they do — see `_reveal` in _drawCoverFore, which owns the easing.
        *
        * The first version painted a shadow RECTANGLE over the trench interior
        * and it read as exactly that: a grey box with four hard edges laid on
