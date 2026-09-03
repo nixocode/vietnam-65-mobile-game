@@ -1807,6 +1807,7 @@ class Game {
     this._updateFires(dt);
     this._updateStructures(dt);
     this._ambient(dt);
+    this._musicTension(dt);
     this._updateFlags(dt);
     this._aiUpdate(dt);
     this.fx.update(dt);
@@ -1956,8 +1957,17 @@ class Game {
       if (!u.burstN || u.burstN <= 0) u.burstN = randi(d.burst[0], d.burst[1]);
       u.burstN--;
       const ammo = (typeof Perks !== 'undefined' && Perks.on(this, u.side, 'ammo')) ? 0.78 : 1;
-      u.fireT = u.burstN > 0 ? 1 / d.rof
-        : rand(d.pause[0], d.pause[1]) * (closeQuarters ? 0.7 : 1) * ammo * dry;
+      const ending = u.burstN <= 0;
+      u.fireT = ending
+        ? rand(d.pause[0], d.pause[1]) * (closeQuarters ? 0.7 : 1) * ammo * dry
+        : 1 / d.rof;
+      /* The breath between bursts is where the weapon gets worked. It was
+       * silent, so a firefight was a stream of shots with nobody reloading in
+       * it. A belt gun shifts its feed; everyone else changes a magazine. */
+      if (ending && Camera.sees(u.x, 80)) {
+        if (d.mg) { if (Math.random() < 0.5) Sound.belt(u.x); }
+        else if (Math.random() < 0.35) Sound.reload(u.x);
+      }
     } else {
       u.fireT = (1 / d.rof) * dry;
     }
@@ -2247,6 +2257,7 @@ class Game {
     t.aiming = false;
     // a man leaving the fight is worth hearing — see Sound.manDown
     if (!t.isHole && !(UNITS[t.key] && UNITS[t.key].vehicle)) Sound.manDown(t.x);
+    this._lossT = Math.min(1.6, (this._lossT || 0) + 0.22);   // feeds the music
     if (UNITS[t.key] && UNITS[t.key].vehicle) {
       // a knocked-out track brews up; no corpse, no blood
       t.baked = true;
@@ -2965,6 +2976,47 @@ class Game {
   }
 
   /* ---------- ambient life ---------- */
+  /* HOW BAD IS IT RIGHT NOW.
+   *
+   * Drives the music bed (Sound.musicTension). Built from the three things a
+   * player would actually name if asked how the battle is going, rather than
+   * from a single counter:
+   *
+   *   contact   how many men are firing, which is the immediate texture
+   *   pressure  how close the nearest enemy is to a flag we hold
+   *   losses    recent casualties, so a bad minute keeps its weight for a while
+   *
+   * Smoothed hard on the way up and harder on the way down: music that tracks
+   * a frame-by-frame count pumps, and the whole point of the layer is that it
+   * arrives and recedes rather than switching.
+   */
+  _musicTension(dt) {
+    if (typeof Sound === 'undefined' || !Sound.musicTension) return;
+    let firing = 0, live = 0;
+    for (const u of this.units) {
+      if (u.deadT != null) continue;
+      live++;
+      if ((u.combatT || 0) > 0) firing++;
+    }
+    const contact = live ? clamp(firing / Math.max(6, live * 0.5), 0, 1) : 0;
+    let near = 1;
+    for (const f of this.flags) {
+      for (const s2 of this.squads) {
+        if (!this.squadAlive(s2).length) continue;
+        if (f.owner && s2.side === f.owner) continue;
+        near = Math.min(near, clamp(Math.abs(this.squadAnchor(s2) - f.x) / 700, 0, 1));
+      }
+    }
+    const pressure = 1 - near;
+    this._lossT = Math.max(0, (this._lossT || 0) - dt * 0.12);
+    const target = clamp(contact * 0.55 + pressure * 0.3 + Math.min(1, this._lossT) * 0.3, 0, 1);
+    const cur = this._musT || 0;
+    // up in about a second, down over roughly eight
+    const k = target > cur ? Math.min(1, dt * 1.1) : Math.min(1, dt * 0.13);
+    this._musT = cur + (target - cur) * k;
+    Sound.musicTension(this._musT);
+  }
+
   _ambient(dt) {
     // birds scatter from the treeline when fighting is close
     this.birdT -= dt;

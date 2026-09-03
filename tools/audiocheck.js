@@ -31,7 +31,8 @@ const ctx = {
     getChannelData: () => new Float32Array(len) }),
   decodeAudioData: () => Promise.resolve(null),
 };
-const sandbox = { console, Math, Date, window: {}, fetch: () => Promise.reject(new Error('no net')),
+const sandbox = { console, Math, Date, window: {},
+  setInterval: () => 0, clearInterval: () => {}, fetch: () => Promise.reject(new Error('no net')),
   AudioContext: function () { return ctx; }, webkitAudioContext: function () { return ctx; },
   requestAnimationFrame: () => 0 };
 sandbox.globalThis = sandbox;
@@ -59,6 +60,20 @@ call('ricochet', () => S.ricochet(600));
 call('explosion', () => S.explosion(1, 600));
 call('sniperShot', () => S.sniperShot(600));
 call('shovel', () => S.shovel(600));
+call('reload', () => S.reload(600));
+call('belt', () => S.belt(600));
+/* The music is SCHEDULED rather than fired, so nothing else would ever execute
+   it. Start it, drive a few bars by hand at both ends of the tension range —
+   the layers are gated on tension, so a quiet-only run would leave the pulse
+   and air branches unvisited — then stop it. */
+call('musicStart', () => S.musicStart('iadrang'));
+for (const t of [0, 0.3, 0.7, 1]) {
+  call('musicBar@' + t, () => {
+    S.musicTension(t);
+    if (S._mus) { S._mus.next = ctx.currentTime; ctx.currentTime += 4; S._musTick(); }
+  });
+}
+call('musicStop', () => S.musicStop());
 const bad = Object.entries(results).filter(([, v]) => v.startsWith('THREW'));
 console.log(JSON.stringify({ checked: Object.keys(results).length,
   failures: bad.length, detail: bad.length ? Object.fromEntries(bad) : results }, null, 1));

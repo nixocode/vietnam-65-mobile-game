@@ -83,8 +83,22 @@ const App = {
     if (h > 0) stage.style.setProperty('--uiH', (h / k) + 'px');
   },
 
+  /* Music is its own switch, not part of the sound one.
+   *
+   * A score and a battlefield are different things to want: plenty of people
+   * play with the guns on and the music off, and folding both into SND would
+   * make that impossible. Persisted beside the campaign progress and perks. */
+  toggleMusic() {
+    Sound.musicOff = !Sound.musicOff;
+    try { localStorage.setItem('v65_music', Sound.musicOff ? '0' : '1'); } catch (e) { /* private mode */ }
+    if (Sound.musicOff) Sound.musicStop();
+    else if (this.game && this.state === 'playing') Sound.musicStart(this.game.map.id);
+    this._syncHud();
+  },
+
   boot() {
     const canvas = document.getElementById('game-canvas');
+    try { Sound.musicOff = localStorage.getItem('v65_music') === '0'; } catch (e) { /* private mode */ }
     this._fitViewport();
     /* Re-run once layout is real. The call above can land before the stylesheet
      * has sized the stage, and the observer below only fires on a CHANGE — so a
@@ -171,6 +185,7 @@ const App = {
     el('btn-pause').onclick = () => this.togglePause();
     el('btn-speed').onclick = () => this.toggleSpeed();
     el('btn-mute').onclick = () => this.toggleMute();
+    el('btn-music').onclick = () => this.toggleMusic();
     el('btn-resume').onclick = () => this.togglePause();
     el('btn-restart').onclick = () => {
       Sound.click();
@@ -327,6 +342,7 @@ const App = {
     document.getElementById('hud').classList.remove('hidden');
     Sound.init();
     Sound.ambientStart(this.game.map);
+    Sound.musicStart(this.game.map.id);
     this.game.setBanner(this.game.map.name, false);
     this.game.emit(`${this.game.map.name} — ${this.game.map.year}`, 'sys');
     this.game.emit(this.game.objectiveText(), 'sys');
@@ -337,6 +353,7 @@ const App = {
     this.game = null;
     UI.active = false;
     Sound.ambientStop();
+    Sound.musicStop();
     document.getElementById('hud').classList.add('hidden');
     this.show('screen-menu');
   },
@@ -364,6 +381,8 @@ const App = {
     Sound.init();
     Sound.setMuted(!Sound.muted);
     document.getElementById('btn-mute').classList.toggle('off', Sound.muted);
+    const mb = document.getElementById('btn-music');
+    if (mb) mb.classList.toggle('off', !!Sound.musicOff);
   },
 
   _onKey(e) {

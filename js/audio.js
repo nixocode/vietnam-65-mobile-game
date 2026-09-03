@@ -358,6 +358,45 @@ const Sound = {
     this._noise(0.16, 'lowpass', 420, 0.7, 0.07 * att, 0.02, pan, w + 0.2);
   },
 
+  /* THE PAUSE BETWEEN BURSTS, which was silent.
+   *
+   * A firefight is not continuous fire — the sim already models bursts and the
+   * breath between them, and that breath is where a rifleman changes a magazine
+   * and a gunner's belt shifts. Filling it is what turns a stream of shots into
+   * men working weapons.
+   *
+   * Both are quiet and short. They sit UNDER the guns by design: this is the
+   * texture between the loud things, and the moment a magazine change is as
+   * loud as a shot the mix stops making sense.
+   */
+  reload(x) {
+    if (!this.ok()) return;
+    const { pan, att, far } = this._spatial(x);
+    if (far > 0.6) return;                 // a magazine change does not carry
+    const w = 0.2 + far * 0.7;
+    const a = att * 0.32 * (1 - far);
+    const j = rand(0.94, 1.08);
+    // magazine out, magazine in, bolt released — three ticks, not one clatter
+    this._noise(0.02, 'bandpass', 2400 * j, 3.0, 0.16 * a, 0, pan, w);
+    this._noise(0.03, 'bandpass', 1500 * j, 2.4, 0.20 * a, 0.13, pan, w);
+    this._tone('square', 900 * j, 0.02, 0.06 * a, 0.24, 420 * j, pan, w);
+    this._noise(0.025, 'highpass', 3200 * j, 1.6, 0.13 * a, 0.245, pan, w);
+  },
+
+  /* A belt shifting in the feed tray — the sound a machine gun makes when it
+   * is not firing, and the thing that tells you one is still there. */
+  belt(x) {
+    if (!this.ok()) return;
+    const { pan, att, far } = this._spatial(x);
+    if (far > 0.66) return;
+    const w = 0.22 + far * 0.8;
+    const a = att * 0.30 * (1 - far * 0.8);
+    for (let i = 0; i < 4; i++) {
+      const j = rand(0.85, 1.2);
+      this._noise(0.016, 'bandpass', 3100 * j, 4.0, 0.10 * a, i * 0.045 + rand(0, 0.02), pan, w);
+    }
+  },
+
   /* WHERE A ROUND LANDS, not just that it was fired.
    *
    * The game already decides what a miss hits — timber off a hut, sparks off an
@@ -597,6 +636,127 @@ const Sound = {
     mekong:  [1.6, 2.4],    // flat water and paddy, some slap off nothing
     khesanh: [2.0, 1.7],    // bare red plateau, hard returns
     hill937: [1.3, 2.9],    // wet ridge in monsoon; rain and mud eat the tail
+  },
+
+  /* ---------------------------------------------------------------- music --
+   *
+   * The game had none. Not a quiet score, not a placeholder — zero references
+   * in the codebase, and it was the largest single absence in the mix.
+   *
+   * What it is NOT: a loop. A looping track under a game about this war would
+   * be either wallpaper or an intrusion, and at the length that would have to
+   * repeat it becomes both. This is a bed that RESPONDS — three layers keyed to
+   * how bad the fight currently is:
+   *
+   *   drone    always. Two detuned low oscillators through a slow filter, the
+   *            sound of the place rather than of an event.
+   *   pulse    a low tom on the beat, fading in as contact builds. It is the
+   *            layer that makes a firefight feel like it is going somewhere.
+   *   air      a sparse high harmonic, only at real intensity, and never on the
+   *            beat — it is there to be unsettling, not tuneful.
+   *
+   * Each map gets its own root, so the five places do not share a key.
+   *
+   * Deliberately quiet and deliberately sparse: the guns are the music in a
+   * war game, and anything here that competes with them is wrong. Scheduled a
+   * bar ahead on a timer, which is the standard WebAudio approach — note timing
+   * off setInterval alone would jitter audibly.
+   */
+  MUSIC_ROOT: { iadrang: 55.0, khesanh: 49.0, mekong: 58.3, cuchi: 51.9, hill937: 46.2 },
+
+  musicStart(mapId) {
+    if (!this.ctx || this._mus) return;
+    if (this.musicOff) return;
+    const root = this.MUSIC_ROOT[mapId] || 55.0;
+    const g = this.ctx.createGain();
+    g.gain.value = 0.0;
+    g.connect(this.dry || this.master);
+    this._mus = { g, root, t: 0, tension: 0, bar: 0, next: this.ctx.currentTime + 0.15 };
+    // fade in over a few seconds so it arrives rather than starts
+    g.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.9, this.ctx.currentTime + 4);
+    this._musTimer = setInterval(() => this._musTick(), 120);
+  },
+
+  musicStop() {
+    if (this._musTimer) { clearInterval(this._musTimer); this._musTimer = null; }
+    const m = this._mus;
+    this._mus = null;
+    if (!m || !this.ctx) return;
+    try {
+      m.g.gain.cancelScheduledValues(this.ctx.currentTime);
+      m.g.gain.setValueAtTime(m.g.gain.value || 0.001, this.ctx.currentTime);
+      m.g.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 1.2);
+    } catch (e) { /* a stopped context cannot ramp; nothing to do */ }
+  },
+
+  /* 0 = quiet lane, 1 = everything is on fire. Called from the sim. */
+  musicTension(v) {
+    if (this._mus) this._mus.tension = clamp(v, 0, 1);
+  },
+
+  _musTick() {
+    const m = this._mus;
+    if (!m || !this.ctx || this.muted) return;
+    const BAR = 3.4;
+    // schedule no further than one bar ahead, so tension changes stay responsive
+    while (m.next < this.ctx.currentTime + BAR) {
+      this._musBar(m, m.next, BAR);
+      m.next += BAR;
+      m.bar++;
+    }
+  },
+
+  _musBar(m, at, BAR) {
+    const ctx = this.ctx, T = m.tension, root = m.root;
+    const bus = (gain, wet) => {
+      const g = ctx.createGain();
+      g.gain.value = gain;
+      g.connect(m.g);
+      if (this.conv && wet) {
+        const s = ctx.createGain(); s.gain.value = wet; g.connect(s); s.connect(this.conv);
+      }
+      return g;
+    };
+    const tone = (freq, t0, dur, gain, type, wet, slideTo) => {
+      const o = ctx.createOscillator(); o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, t0);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
+      const g = bus(0, wet);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), t0 + dur * 0.18);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g); o.start(t0); o.stop(t0 + dur + 0.05);
+    };
+
+    // ---- drone: always, two voices a few cents apart so it breathes ----
+    const dg = 0.055 + 0.02 * T;
+    tone(root, at, BAR * 1.06, dg, 'sine', 0.25);
+    tone(root * 1.005, at, BAR * 1.06, dg * 0.8, 'sine', 0.3);
+    // a fifth above, entering with tension — the interval that adds unease
+    if (T > 0.25) tone(root * 1.5, at, BAR * 0.9, 0.02 * T, 'triangle', 0.4);
+
+    // ---- pulse: a low tom on 1 and 3, harder as it gets worse ----
+    if (T > 0.12) {
+      for (const beat of [0, 0.5]) {
+        const t0 = at + beat * BAR;
+        const g = bus(0, 0.18);
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(root * 1.6, t0);
+        o.frequency.exponentialRampToValueAtTime(root * 0.85, t0 + 0.22);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.10 * T, t0 + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.30);
+        o.connect(g); o.start(t0); o.stop(t0 + 0.35);
+      }
+    }
+
+    // ---- air: sparse, high, never on the beat ----
+    if (T > 0.55 && Math.random() < 0.45) {
+      const t0 = at + rand(0.18, 0.8) * BAR;
+      tone(root * (Math.random() < 0.5 ? 6 : 8), t0, 1.7, 0.012 * T, 'triangle', 0.75);
+    }
   },
 
   ambientStart(map) {
