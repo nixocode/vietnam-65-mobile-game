@@ -471,6 +471,7 @@ const App = {
         }
         for (let i = 0; i < this.speed; i++) this.game.update(simDt);
         UI.update(dt);
+        if (typeof Tutor !== 'undefined') Tutor.update(dt, this.game.time || 0);
         if (this.game.over && !this.resultShown) {
           this.resultDelay += dt;
           if (this.resultDelay > 2.2) {

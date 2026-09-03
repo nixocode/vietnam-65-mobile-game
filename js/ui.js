@@ -400,6 +400,7 @@ const UI = {
       }
       if (best) {
         this.selectSquad(best);
+        if (typeof Tutor !== 'undefined') Tutor.teach('squad');
         Sound.click();
       } else if (this.selectedSquad && this.selectedSquad.lane === lane &&
                  g.squadAlive(this.selectedSquad).length) {

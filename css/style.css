@@ -1209,3 +1209,28 @@ body.touch #hud, body.touch .screen { height: var(--uiH, 720px); }
    never collapses its tab strip for it. This gives the nudge somewhere to go
    for ~360ms and is removed immediately afterwards. */
 body.reclaiming { overflow: auto; height: calc(100dvh + 96px); }
+
+/* The tutor line. Sits under the top bar, out of the lanes, and is the only
+   thing on screen that is allowed to interrupt — so it is quiet, it is one
+   line, and it is gone in five seconds. */
+#tutor {
+  position: absolute; left: 50%; top: 74px; transform: translateX(-50%);
+  max-width: 620px; padding: 7px 16px;
+  background: rgba(12,14,9,.86);
+  border: 1px solid var(--brass, #b79b5b);
+  border-radius: 2px;
+  color: #e6dfbe;
+  font: 12px/1.45 'Courier New', Courier, monospace;
+  letter-spacing: .04em;
+  text-align: center;
+  opacity: 0; transition: opacity .35s;
+  pointer-events: none;
+  z-index: 30;
+}
+#tutor.show { opacity: 1; }
+body.touch #tutor {
+  font-size: calc(11px / var(--uiK, 1));
+  padding: calc(6px / var(--uiK, 1)) calc(14px / var(--uiK, 1));
+  max-width: calc(420px / var(--uiK, 1));
+  top: calc(60px / var(--uiK, 1));
+}

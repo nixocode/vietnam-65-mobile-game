@@ -702,6 +702,10 @@ class Game {
     if (s.cover) this.coverLeave(s);
     c.occ.push(s);
     s.cover = c; s.inCover = true;
+    if (s.side === this.player) {
+      if (typeof Tutor !== 'undefined') Tutor.teach('trench');
+      if (c.occ.length > 1) if (typeof Tutor !== 'undefined') Tutor.teach('crowd');
+    }
     // a new hole is an unimproved hole, and nobody has ranged it yet
     s.entrenchT = 0; s.rangedT = 0; s.rangedIn = false; s.rangedShots = 0;
     return true;
@@ -744,6 +748,7 @@ class Game {
     if (c.lever === 'over') {
       const n = c.occ.filter(s => s.side === this.player).length;
       if (n) this.emit(`OVER THE TOP — LANE ${c.lane + 1}`, this.player);
+      if (typeof Tutor !== 'undefined') Tutor.teach('lever');
     }
     return c.lever;
   }
@@ -1273,6 +1278,7 @@ class Game {
       if (was < COVER.DIG_TIME && s.entrenchT >= COVER.DIG_TIME &&
           s.side === this.player) {
         this.fx.floater(s.x, groundY(this.map, s.lane, s.x) - 34, 'DUG IN', '#b5c98f');
+        if (typeof Tutor !== 'undefined') Tutor.teach('dugin');
         if (Camera.sees(s.x, 60)) Sound.shovel(s.x);
       }
     }
@@ -1292,6 +1298,7 @@ class Game {
       this.fx.addDecal(s.lane, x, 'crater', 10);
       this.fx.floater(c.x, groundY(this.map, s.lane, c.x) - 40, 'RANGING ROUNDS', '#e08767');
       this.emit(`POSITION RANGED — LANE ${s.lane + 1}`, s.side);
+      if (s.side === this.player) if (typeof Tutor !== 'undefined') Tutor.teach('ranged');
       this._areaDamage(s.lane, x, 40, 8,
         { side: this.foeOf(s.side) }, this.foeOf(s.side));
       return;
@@ -1808,6 +1815,21 @@ class Game {
     this._updateStructures(dt);
     this._ambient(dt);
     this._musicTension(dt);
+    /* Two lessons that are about a SITUATION rather than an event, so they are
+     * checked rather than hooked. Both are cheap and both stop the moment they
+     * have been taught once. */
+    if (typeof Tutor !== 'undefined' && Tutor.load) {
+      const seen = Tutor.load();
+      if (!seen.m79 && this.squads.some(q => q.side === this.player &&
+          SQUADS[q.key] && SQUADS[q.key].blooper && this.squadAlive(q).length)) {
+        Tutor.teach('m79');
+      }
+      if (!seen.enemydug && this.squads.some(q => q.side !== this.player &&
+          q.cover && q.cover.dug && this.squadAlive(q).length &&
+          Camera.sees(this.squadAnchor(q), 60))) {
+        Tutor.teach('enemydug');
+      }
+    }
     this._updateFlags(dt);
     this._aiUpdate(dt);
     this.fx.update(dt);
@@ -2223,6 +2245,7 @@ class Game {
     // and once in a while, say it in words
     if ((t.clangSayCd || 0) <= 0 && Camera.sees(t.x, 60)) {
       t.clangSayCd = 4.5;
+      if (killer && killer.side === this.player) if (typeof Tutor !== 'undefined') Tutor.teach('armour');
       this.fx.floater(t.x, t.y - 44 * sc, 'ARMOUR', '#c9cbb4');
     }
   }

@@ -56,6 +56,9 @@ function build() {
     }),
     Camera: { x: 0, targetX: 0, sees: () => true, center() {}, pan() {}, reset() {} },
     Renderer: { markDirty() {} },
+    // Tutor writes to a DOM node it will never find here; the queueing logic
+    // still runs, which is the part the sim can exercise.
+    document: { getElementById: () => null },
     /* sprite3d.js is included for its gait constants (S3_REF_SPD and friends,
      * which the sim reads), not for its loader. These two exist only so the
      * file parses; nothing here ever calls load(). */
@@ -69,11 +72,12 @@ function build() {
     fetch: () => Promise.reject(new Error('no network in the sim harness')),
   };
   sandbox.globalThis = sandbox;
-  const src = ['js/data.js', 'js/sprite3d.js', 'js/fx.js', 'js/perks.js', 'js/game.js']
+  const src = ['js/data.js', 'js/sprite3d.js', 'js/fx.js', 'js/perks.js',
+               'js/tutor.js', 'js/game.js']
     .map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n;\n');
   const ctx = vm.createContext(sandbox);
   // one script, so the files share a lexical scope the way <script> tags do
-  vm.runInContext(src + '\n;globalThis.__api = { Game, UNITS, SQUADS, MAPS, COVER, GRENADE, M79 };',
+  vm.runInContext(src + '\n;globalThis.__api = { Game, UNITS, SQUADS, MAPS, COVER, GRENADE, M79, Tutor };',
                   ctx, { filename: 'vietnam-sim.js' });
   return { api: sandbox.__api, sound: sandbox.Sound };
 }
