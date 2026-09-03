@@ -5025,7 +5025,11 @@ const Renderer = {
        * the standing `aim` pose that had to be shoved 26px down the screen to
        * pretend. Dropping this one that far buries him to the waist. 9px seats
        * him without sinking him. See Sprite3D._sel. */
-      const proneDrop = u.pose === 'prone' ? 9 * scale
+      /* 15, not 9. Prone and kneel now share the crouch frame (see the note in
+       * Sprite3D._sel), so the DROP is the only thing separating them — a man
+       * down has to sit visibly lower than a man on one knee or the two
+       * postures are indistinguishable. */
+      const proneDrop = u.pose === 'prone' ? 15 * scale
         : u.pose === 'kneel' ? 3 * scale : 0;
       /* RECOIL — a per-shot kick on the whole man.
        *

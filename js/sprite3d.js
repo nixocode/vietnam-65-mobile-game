@@ -239,8 +239,29 @@ const Sprite3D = {
        * toward the ground — a STANDING man moved down the screen. This one is
        * actually a low posture. `prone` itself stays out of the atlas entirely
        * (see SKIP in tools/pack_sprites3d.py). */
+      /* FRAME 0, NOT FRAME 1 — and the note above is wrong about frame 1.
+       *
+       * It claims frame 1 is "a man going to ground, pitched forward and low,
+       * rifle level, head up". Rendered and looked at, it is not: the man is
+       * doubled over head-DOWN with his legs in the air, already into the
+       * donor's barrel roll. That is the somersault the owner has been
+       * reporting in firefights, and it was never a transition bug — it is the
+       * held pose itself.
+       *
+       * Every candidate in the atlas was checked before settling: dive 2-8 are
+       * the rest of the roll, death 5-11 put the man on his BACK with the
+       * weapon across him, and the donor's twenty-four mocap clips contain no
+       * crouch, kneel or prone at all — the three hand-posed attempts on disk
+       * (prone, kneel, crouch) all break the legs, because this rig has no IK
+       * and posing the legs by bone rotation splays them.
+       *
+       * So prone holds frame 0, the crouch, and earns its lower silhouette from
+       * `proneDrop` in the draw instead. It is not a true prone. It is a man
+       * hunkered lower than a kneel, which is a smaller lie than a cartwheel,
+       * and it costs nothing to ship today. A real prone needs a clip this
+       * donor does not have. */
       const c = pick('dive', 'aim', 'idle');
-      if (c === 'dive' && C[c].length > 1) return [c, 1];
+      if (c === 'dive' && C[c].length) return [c, 0];
       if (c) {
         // fallback: the old aim-based hold, still with slow breathing so a
         // frozen frame does not read as a bug
