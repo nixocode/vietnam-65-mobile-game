@@ -1203,3 +1203,9 @@ body.touch #stage {
 body.touch #game-canvas { object-fit: cover; }
 /* the HUD box follows the screen's shape — see _fitUI */
 body.touch #hud, body.touch .screen { height: var(--uiH, 720px); }
+
+/* Momentary, while Mobile._reclaimChrome nudges the scroll.
+   The page is overflow:hidden so it can never scroll, which is exactly why iOS
+   never collapses its tab strip for it. This gives the nudge somewhere to go
+   for ~360ms and is removed immediately afterwards. */
+body.reclaiming { overflow: auto; height: calc(100dvh + 96px); }

@@ -24,6 +24,46 @@ const App = {
    * So: ignore implausible widths rather than committing them, and re-run once
    * layout is real (see boot).
    */
+  /* SIZE FROM THE VIEWPORT THE BROWSER ACTUALLY LEAVES.
+   *
+   * The stage used to be sized in CSS with `min(100vw, calc(100vh * 16/9))`,
+   * and on iOS `vh` is the LARGE viewport — the height with the browser chrome
+   * hidden. Safari was not hiding its chrome, so the stage was sized against a
+   * screen taller than the one that existed: the height overflowed, the 16:9
+   * rule shrank the width to compensate, and the remainder became black bars
+   * down both sides. That is the letterboxing in the owner's screenshot, under
+   * a URL bar and a tab strip taking a quarter of the display.
+   *
+   * `100dvh` fixes it on paper and is already on `body`, but it is not on every
+   * iOS the game will meet and it says nothing about width. `visualViewport` is
+   * the only thing that reports what is genuinely on screen right now, through
+   * chrome appearing, chrome collapsing, and the keyboard — so the layout is
+   * driven from it and the CSS units are left as the fallback.
+   */
+  _fitViewport() {
+    const app = document.getElementById('app');
+    const stage = document.getElementById('stage');
+    if (!app || !stage) return;
+    const vv = window.visualViewport;
+    const vw = Math.round(vv ? vv.width : window.innerWidth);
+    const vh = Math.round(vv ? vv.height : window.innerHeight);
+    if (!(vw > 0 && vh > 0)) return;          // pre-layout; committing 0 blanks it
+    app.style.width = vw + 'px';
+    app.style.height = vh + 'px';
+    /* A touch build fills what it is given; a desktop one keeps its 16:9 box.
+     * Both are computed here rather than in CSS so neither depends on which
+     * viewport unit this browser believes in. */
+    if (document.body.classList.contains('touch')) {
+      stage.style.width = '';
+      stage.style.height = '';
+    } else {
+      const w = Math.min(vw, vh * CANVAS_W / CANVAS_H);
+      stage.style.width = Math.round(w) + 'px';
+      stage.style.height = Math.round(w * CANVAS_H / CANVAS_W) + 'px';
+    }
+    this._fitUI();
+  },
+
   _fitUI() {
     const stage = document.getElementById('stage');
     if (!stage) return;
@@ -45,23 +85,42 @@ const App = {
 
   boot() {
     const canvas = document.getElementById('game-canvas');
-    this._fitUI();
+    this._fitViewport();
     /* Re-run once layout is real. The call above can land before the stylesheet
      * has sized the stage, and the observer below only fires on a CHANGE — so a
      * device that loads straight into its final size would keep the bad value
      * forever. rAF covers the normal case, `load` covers a late stylesheet. */
-    requestAnimationFrame(() => this._fitUI());
-    window.addEventListener('load', () => this._fitUI());
+    requestAnimationFrame(() => this._fitViewport());
+    window.addEventListener('load', () => this._fitViewport());
     if (window.ResizeObserver) {
       new ResizeObserver(() => this._fitUI()).observe(document.getElementById('stage'));
     }
-    window.addEventListener('resize', () => this._fitUI());
-    window.addEventListener('orientationchange', () => setTimeout(() => this._fitUI(), 120));
+    window.addEventListener('resize', () => this._fitViewport());
+    window.addEventListener('orientationchange', () => setTimeout(() => this._fitViewport(), 120));
+    /* The events that actually fire when mobile chrome moves.
+     *
+     * `window.resize` is not reliably dispatched when Safari collapses its tab
+     * strip or Chrome hides its address bar — the layout viewport is unchanged,
+     * only the VISUAL one moved. These two are the signal, and without them the
+     * game keeps drawing into space the browser has just taken back. */
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => this._fitViewport());
+      window.visualViewport.addEventListener('scroll', () => this._fitViewport());
+    }
     Renderer.init(canvas);
     UI.init(canvas);
     // after UI, so the drag-suppression click listener is registered against a
     // canvas that already has UI's own handler on it
     Mobile.init();
+    /* Re-fit the moment `body.touch` exists.
+     *
+     * `_fitViewport` branches on that class, and it runs at the top of boot —
+     * before Mobile.init has added it. So the first fit took the DESKTOP branch
+     * and wrote an explicit 16:9 box onto the stage in inline pixels; the touch
+     * branch only clears those on a later call. A stray rAF happened to cover
+     * it one frame afterwards, which is a letterbox flash on every load and a
+     * permanent letterbox the moment that rAF is reordered. */
+    this._fitViewport();
     this._wireMenus();
     const status = document.getElementById('load-status');
     Sprite3D.load();                  // soldiers rendered off the 3D rig

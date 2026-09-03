@@ -122,27 +122,67 @@ const Mobile = {
     return !!(document.fullscreenElement || document.webkitFullscreenElement);
   },
 
+  /* Is real, element-level fullscreen available at all?
+   *
+   * On iOS Safari it is NOT — the Fullscreen API exists only for <video>, so a
+   * canvas game can never enter it. That is a platform fact, not a bug in the
+   * request, and the old code hid it: `await (a ? a() : b && b())` quietly
+   * evaluated to `undefined` on an iPhone, the catch swallowed nothing because
+   * nothing threw, and the button appeared to do exactly nothing forever. */
+  canNativeFullscreen() {
+    const el = document.documentElement;
+    return !!((el.requestFullscreen && document.fullscreenEnabled !== false) ||
+              el.webkitRequestFullscreen);
+  },
+
+  /* WHAT TO DO WHEN THERE IS NO FULLSCREEN API.
+   *
+   * iOS Safari collapses its tab strip and shrinks its URL bar when the page
+   * scrolls — that is the only lever a web page has there, and it is what every
+   * browser game uses. This page never scrolls (body is overflow:hidden), so it
+   * never collapses anything, which is why the owner's screenshot has a URL bar
+   * AND a tab strip eating a quarter of the screen.
+   *
+   * So: briefly let the document be taller than the viewport, nudge the scroll
+   * from inside the user gesture, then put it back and re-fit to whatever space
+   * the browser has left. It is not fullscreen and it does not pretend to be —
+   * it reclaims the tab strip, which on the screenshot is most of what was
+   * lost, and it needs no install. */
+  _reclaimChrome() {
+    const b = document.body;
+    b.classList.add('reclaiming');
+    window.scrollTo(0, 1);
+    setTimeout(() => {
+      b.classList.remove('reclaiming');
+      if (typeof App !== 'undefined' && App._fitViewport) App._fitViewport();
+      this._syncFsButton();
+    }, 360);
+  },
+
   async toggleFullscreen() {
     const el = document.documentElement;
-    try {
-      if (this.isFullscreen()) {
+    if (this.isFullscreen()) {
+      try {
         await (document.exitFullscreen ? document.exitFullscreen()
           : document.webkitExitFullscreen && document.webkitExitFullscreen());
-      } else {
+      } catch (err) { /* leaving is best-effort; the layout re-fits regardless */ }
+    } else if (this.canNativeFullscreen()) {
+      try {
         await (el.requestFullscreen ? el.requestFullscreen({ navigationUI: 'hide' })
-          : el.webkitRequestFullscreen && el.webkitRequestFullscreen());
-        /* Landscape lock is best-effort and rejects on plenty of browsers
-         * (notably iOS, which has no element fullscreen outside video at all).
-         * A rejection is not an error worth surfacing — the rotate prompt
-         * already tells the player what to do. */
+          : el.webkitRequestFullscreen());
+        // best-effort, and rejects on plenty of browsers — the rotate prompt
+        // already tells the player what to do
         if (screen.orientation && screen.orientation.lock) {
           screen.orientation.lock('landscape').catch(() => {});
         }
+      } catch (err) {
+        // denied by the browser. Take what can be taken instead of nothing.
+        this._reclaimChrome();
       }
-    } catch (err) {
-      /* Denied, or unsupported. The game is perfectly playable windowed, so
-       * this stays silent rather than throwing a dialog at the player. */
+    } else {
+      this._reclaimChrome();
     }
+    if (typeof App !== 'undefined' && App._fitViewport) App._fitViewport();
     this._syncFsButton();
   },
 
@@ -158,12 +198,15 @@ const Mobile = {
     this._syncFsButton();
   },
 
+  /* The button must never claim something it did not do. */
   _syncFsButton() {
     const btn = document.getElementById('btn-fullscreen');
     if (!btn) return;
     const on = this.isFullscreen();
     btn.textContent = on ? '⤡' : '⤢';
-    btn.title = on ? 'Leave fullscreen' : 'Fullscreen';
+    btn.title = on ? 'Leave fullscreen'
+      : this.canNativeFullscreen() ? 'Fullscreen'
+      : 'Hide the browser bars';        // iOS: all a web page can actually do
   },
 
   /* ------------------------------------------------------------ orientation */
