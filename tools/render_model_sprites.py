@@ -263,8 +263,8 @@ def recolour(unit):
 # both are built procedurally below and constrained to the hand and head bones.
 GEAR = {
     'rifleman':  ('m16', 'm1'),
-    'arvn':      ('m16', 'm1'),
-    'guerrilla': ('ak', 'conical'),
+    'arvn':      ('m14', 'm1'),        # what the ARVN actually carried
+    'guerrilla': ('sks', 'conical'),   # local force: older rifles, not AKs
     'nva':       ('ak', 'pith'),
     'm60':       ('m60', 'm1'),
     'engineer':  ('m16', 'm1'),
@@ -352,6 +352,8 @@ WEAPON_MESH = {
     # other two look wrong, which is the same "assets from different worlds"
     # fault at weapon scale, so the AK gets the same treatment.
     'ak':  'BUILT:ak',
+    'sks': 'BUILT:sks',
+    'm14': 'BUILT:m14',
     'm60': 'BUILT:m60',
     'svd': 'Sniper_2',   # wood stock and scope, for the marksman — reads fine
     # The pack's Sniper has no visible scope and its RocketLauncher has neither
@@ -363,10 +365,10 @@ WEAPON_MESH = {
 }
 # barrel length in metres, used to scale each mesh to a believable size
 WEAPON_LEN = {'m16': 0.99, 'ak': 0.87, 'm60': 1.10, 'svd': 1.20, 'm40': 1.16,
-              'rpg': 1.30, 'm79': 0.74}
+              'rpg': 1.30, 'm79': 0.74, 'sks': 1.02, 'm14': 1.10}
 # where the support hand grips, as a fraction of the weapon's length from the grip
 FOREGRIP_F = {'m16': 0.42, 'ak': 0.38, 'm60': 0.34, 'svd': 0.44, 'm40': 0.44,
-              'rpg': 0.30, 'm79': 0.40}
+              'rpg': 0.30, 'm79': 0.40, 'sks': 0.40, 'm14': 0.42}
 
 # Cross-section as (height / length, width / length), including magazine and
 # sights — i.e. the silhouette the side camera actually sees.
@@ -392,6 +394,8 @@ WEAPON_ASPECT = {
     'm40': (0.17, 0.050),   # bolt gun, internal magazine, slenderest of them
     'rpg': (0.22, 0.045),
     'm79': (0.20, 0.052),
+    'sks': (0.19, 0.040),
+    'm14': (0.20, 0.042),
 }
 
 
@@ -526,6 +530,37 @@ def _build_weapon(kind):
         box(0.73, 1.00, -0.020, 0.020, 0.028, METAL)       # barrel
         box(0.845, 0.885, 0.020, 0.078, 0.024, METAL)      # front sight post
         box(0.955, 1.00, -0.030, 0.030, 0.036, METAL)      # flash hider
+    elif kind == 'sks':
+        # SKS: the local-force rifle, and the opposite tell to an AK — one long
+        # unbroken piece of WOOD with no magazine hanging under it. The AK is
+        # read by its banana magazine; take that away and lengthen the stock and
+        # the two are distinguishable at sprite size, which is the whole reason
+        # this exists as its own mesh rather than as a recoloured AK.
+        box(0.00, 0.34, -0.056, 0.046, 0.054, WOOD, shear=0.014)     # long stock
+        box(0.34, 0.52, -0.050, 0.050, 0.050, METAL)                 # receiver
+        box(0.37, 0.46, 0.050, 0.062, 0.042, METAL)                  # bolt cover
+        box(0.40, 0.47, -0.108, -0.048, 0.038, WOOD, shear=0.018)    # small mag
+        box(0.47, 0.50, -0.074, -0.048, 0.046, METAL)                # trigger guard
+        box(0.52, 0.78, -0.056, 0.046, 0.052, WOOD)                  # handguard
+        box(0.56, 0.76, 0.046, 0.070, 0.038, WOOD)                   # upper wood
+        box(0.78, 0.96, -0.020, 0.020, 0.028, METAL)                 # barrel
+        box(0.87, 0.905, 0.020, 0.076, 0.024, METAL)                 # front sight
+        # the folding bayonet, stowed under the muzzle — unmistakable, and the
+        # one silhouette detail no other weapon in the set has
+        box(0.80, 0.99, -0.052, -0.026, 0.020, METAL)
+    elif kind == 'm14':
+        # M14: what the ARVN and the early advisors carried. Longer than an M16,
+        # WOOD rather than black plastic, and a straight box magazine — so it
+        # reads as neither an M16 nor an AK.
+        box(0.00, 0.36, -0.058, 0.048, 0.056, WOOD, shear=0.016)     # long stock
+        box(0.36, 0.55, -0.050, 0.052, 0.052, METAL)                 # receiver
+        box(0.38, 0.48, 0.052, 0.066, 0.044, METAL)                  # op rod
+        box(0.42, 0.49, -0.150, -0.050, 0.040, BLACK)                # straight mag
+        box(0.49, 0.52, -0.078, -0.050, 0.048, METAL)                # trigger guard
+        box(0.55, 0.80, -0.058, 0.046, 0.054, WOOD)                  # handguard
+        box(0.80, 0.97, -0.022, 0.022, 0.030, METAL)                 # barrel
+        box(0.88, 0.92, 0.022, 0.082, 0.026, METAL)                  # front sight
+        box(0.955, 1.00, -0.030, 0.030, 0.036, METAL)                # flash hider
     elif kind == 'ak':
         box(0.00, 0.27, -0.052, 0.042, 0.052, WOOD, shear=0.016)     # stock
         box(0.27, 0.53, -0.048, 0.050, 0.050, METAL)                 # receiver
