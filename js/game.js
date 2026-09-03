@@ -1534,7 +1534,11 @@ class Game {
     }
     if (target == null) return false;
     s.bloopCd = M79.cd;
-    const m = alive[0];
+    /* Out of the tube that is DRAWN, not out of whoever happens to be first in
+     * the squad. Without this the Weapons Team's machine gunner fired the M79
+     * while the man holding one stood next to him — which was true before the
+     * grenadier existed and became visibly wrong the moment he did. */
+    const m = alive.find(q => q.key === 'grenadier') || alive[0];
     m.nadeT = 0.55;                       // he shoulders it briefly
     Sound.blooper(m.x);
     this.strikes.push({

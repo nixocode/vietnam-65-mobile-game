@@ -99,6 +99,7 @@ const BASE_X = { us: 52, vc: WORLD_W - 52 };
 /* unit key → sliced sprite sheet (assets/manifest.js). Missing sheet = procedural. */
 const UNIT_SPRITES = {
   rifleman: 'us_rifle', arvn: 'arvn', m60: 'us_m60', engineer: 'us_rifle',
+  grenadier: 'us_rifle',
   recon: 'us_sniper', sniper: 'us_sniper',
   guerrilla: 'vc_rifle', nva: 'vc_gunner', rpd: 'vc_gunner',
   sapper: 'vc_black', marksman: 'vc_sniper',
@@ -199,6 +200,18 @@ const UNITS = {
               hat: null, mg: true, suppress: true, vehicle: true, prop: 'm113',
               armour: 0.34 },
 
+  /* The man who actually carries the M79.
+   *
+   * The weapon shipped as a squad ability and worked, but nothing on screen
+   * held one — the Weapons Team fired high explosive out of a rifle. He is a
+   * rifleman in every stat that matters; the point of him is the silhouette,
+   * which is why the mesh was authored when the weapon was and only the atlas
+   * was ever missing. `_squadBlooper` fires from him by preference, so the
+   * round leaves the tube it is drawn coming out of. */
+  grenadier:{ snd: 'm16', side: 'us', name: 'Grenadier', sub: 'M79', cost: 0, cd: 0,
+              hp: 55, dmg: 7, rof: 3.6, burst: [2, 3], pause: [1.4, 2.2],
+              range: 300, speed: 42, acc: 0.32, hat: 'm1' },
+
   guerrilla:{ snd: 'sks', side: 'vc', name: 'Guerrilla', sub: 'Local Force', cost: 8, cd: 3, hp: 45, dmg: 8, rof: 5, burst: [2, 4], pause: [1.0, 1.9], range: 280, speed: 44, acc: 0.35, hat: 'conical', conceal: true, ambush: 1.6 },
   nva:      { snd: 'ak', side: 'vc', name: 'NVA Regular', sub: 'AK-47', cost: 14, cd: 4.5, hp: 60, dmg: 10, rof: 5.5, burst: [2, 5], pause: [0.9, 1.7], range: 310, speed: 40, acc: 0.4, hat: 'pith', conceal: true, ambush: 1.35 },
   rpd:      { snd: 'rpd', side: 'vc', name: 'RPD Gunner', sub: 'MG', cost: 22, cd: 9, hp: 65, dmg: 6, rof: 8.5, burst: [5, 9], pause: [1.4, 2.3], range: 360, speed: 33, acc: 0.3, hat: 'pith', mg: true, suppress: true },
@@ -224,7 +237,7 @@ const SQUADS = {
                comp: ['arvn', 'arvn', 'arvn'], portrait: 'port_arvn',
                grenades: true, ability: 'Frag Grenades' },
   weapons:   { side: 'us', role: 'support', name: 'Weapons Team', sub: 'M60 + rifle', cost: 30, cd: 12,
-               comp: ['m60', 'rifleman'], portrait: 'port_m60',
+               comp: ['m60', 'grenadier'], portrait: 'port_m60',
                suppressive: true, blooper: true, ability: 'M79 Blooper — HE at range · Suppressive Fire — pins a target squad' },
   engineers: { side: 'us', role: 'special', name: 'Engineer Team', sub: 'Demo ×2', cost: 24, cd: 10,
                comp: ['engineer', 'engineer'], portrait: 'port_engineer',

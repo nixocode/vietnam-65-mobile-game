@@ -18,6 +18,10 @@ const Camera = {
 /* ============================== Soldiers ============================== */
 const SOLDIER_COLORS = {
   rifleman: { coat: '#4d5a3c', pants: '#414c34', hat: '#3d4830', skin: '#c9a37d' },
+  // same kit as a rifleman — he is one, with a different weapon. Present here
+  // because a unit missing from this table crashes the vector fallback on
+  // `C.pants`, which is exactly how rpgman and m113 broke once.
+  grenadier: { coat: '#4d5a3c', pants: '#414c34', hat: '#3d4830', skin: '#c9a37d' },
   arvn:     { coat: '#5d6a49', pants: '#4d583c', hat: '#48533a', skin: '#c19a70' },
   m60:      { coat: '#4d5a3c', pants: '#414c34', hat: '#3d4830', skin: '#b28963' },
   engineer: { coat: '#55604a', pants: '#414c34', hat: '#3d4830', skin: '#c9a37d' },
