@@ -5053,6 +5053,10 @@ const Renderer = {
         // debounced (see MOVE_HOLD) — the raw flag flickers sub-100ms and that
         // reached the screen as clip thrash
         moving: u.movingVis != null ? u.movingVis : u.moving,
+        // a withdrawing squad plays a rearward gait, and a squad out of contact
+        // stands at ease — see the two branches at the top of Sprite3D._sel
+        ceding: !!(u.squad && u.squad.ceding),
+        combat: (u.combatT || 0) > 0 || (u.squad && u.squad.underFireT > 0),
         phase: u.phase, dist: u.dist || 0, spd: u.spd || 0,
         phWalk: u.phWalk, phRun: u.phRun,
         gaitOff: u.gaitOff || 0, gaitK: u.gaitK || 1,

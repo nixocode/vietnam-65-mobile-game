@@ -78,7 +78,8 @@ SKIP = {'melee', 'prone', 'kneel',
 # the kneel, frame 1 is prone, and the stance transition runs between them.
 # Frames 2-8 are the donor's barrel roll and no code path can select them, so
 # they are 7 dead frames a unit in the desktop build as well.
-MOBILE_FRAMES = {'walk': 12, 'runfire': 10, 'death': 8, 'throw': 6, 'dive': 2}
+MOBILE_FRAMES = {'walk': 12, 'runfire': 10, 'death': 8, 'throw': 6, 'dive': 2,
+                 'fallback': 8, 'rest': 4}
 
 # Clips that must keep their FIRST n frames rather than an even spread.
 #
@@ -111,7 +112,8 @@ FIG_H, ORTHO, CAM_Z = 1.8, 1.8 * 1.5, 1.8 * 0.52
 
 # clip playback order is fixed so a frame index means the same thing everywhere
 CLIP_ORDER = ['idle', 'idle2', 'walk', 'run', 'runfire', 'aim', 'fire',
-              'hit', 'hit2', 'death', 'prone', 'throw', 'dive', 'melee']
+              'hit', 'hit2', 'death', 'prone', 'throw', 'dive', 'melee',
+              'fallback', 'rest']
 
 
 def pack(unit):

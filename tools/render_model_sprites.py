@@ -114,14 +114,19 @@ os.makedirs(OUTDIR, exist_ok=True)
 #   MB = 0.0581 * frames_per_unit * 12
 CLIP_FRAMES = {'idle': 6, 'aim': 6, 'fire': 7, 'run': 24,
                'runfire': 20, 'walk': 28, 'death': 12, 'hit': 4, 'prone': 4,
-               'idle2': 6, 'throw': 9, 'dive': 9, 'melee': 8, 'hit2': 4}
-LOOPING = {'idle', 'idle2', 'run', 'runfire', 'walk', 'prone'}
+               'idle2': 6, 'throw': 9, 'dive': 9, 'melee': 8, 'hit2': 4,
+               # Two of the donor's twenty-four clips that nothing had ever
+               # used. Listed straight out of the .glb while hunting for a
+               # prone: Run_Back, Run_Left, Run_Right, Interact and Wave were
+               # all sitting there unmined.
+               'fallback': 14, 'rest': 6}
+LOOPING = {'idle', 'idle2', 'run', 'runfire', 'walk', 'prone', 'fallback', 'rest'}
 
 # Clips where the donor is NOT holding a gun — Idle_Gun drops the arm to the
 # soldier's side and Walk is empty-handed, so the rifle ends up hidden behind a
 # leg or aimed at nothing. For these, an IK constraint pulls the firing hand to a
 # carry position and the weapon, which rides that hand, comes with it.
-CLIP_CARRY = {'idle': 1.0, 'walk': 1.0, 'idle2': 1.0}
+CLIP_CARRY = {'idle': 1.0, 'walk': 1.0, 'idle2': 1.0, 'rest': 1.0, 'fallback': 1.0}
 
 # game state -> animation name inside the model (substring match, case-insensitive)
 STATE_ACTIONS = {
@@ -139,6 +144,15 @@ STATE_ACTIONS = {
     'dive':   'Roll',            # going to ground / diving into cover
     'melee':  'Punch_Right',     # butt-stroke, when the range closes to nothing
     'hit2':   'HitRecieve_2',    # a second flinch, so hits are not one animation
+    # A REAL WITHDRAWAL. `Run_Back` is the donor moving backwards, facing the
+    # way it came — which is exactly what FALL BACK means and what the game has
+    # always drawn as a forward run with the sprite flipped. Men retreating
+    # while looking at the thing they are retreating from is the whole read.
+    'fallback': 'Run_Back',
+    # AT EASE. The plain `Idle` is empty-handed, so it goes through CLIP_CARRY
+    # like walk does and the rifle comes down to a carry rather than staying
+    # levelled at nothing. A squad out of contact should not be aiming.
+    'rest':   'Idle',
     # `Interact` was probed as a possible free crouch and is not one — it is a
     # standing rifle inspection. The kneel is posed instead, see _kneel_pose.
 }

@@ -316,6 +316,29 @@ const Sprite3D = {
         return [c, Math.min(C[c].length - 1, Math.floor(p * C[c].length))];
       }
     }
+    /* GOING BACKWARDS LOOKS LIKE GOING BACKWARDS.
+     *
+     * A squad on FALL BACK used to play the forward run with the sprite
+     * flipped, so men withdrawing appeared to charge the way they came. The
+     * donor had `Run_Back` all along — the figure moving rearward while still
+     * facing the threat — and nothing had ever used it. That facing is the
+     * whole read: it is the difference between a retreat and a rout. */
+    if (o.moving && o.ceding && C.fallback && C.fallback.length) {
+      const n = C.fallback.length;
+      const t = (o.dist || 0) / (S3_TARGET_H * (o.scale || 1) * 0.72) + (o.gaitOff || 0);
+      const q = ((t % 1) + 1) % 1 * n;
+      return ['fallback', Math.floor(q) % n, q - Math.floor(q)];
+    }
+    /* AT EASE. A squad with nothing to shoot at should not be aiming at
+     * nothing. `rest` is the donor's plain Idle with the weapon brought down to
+     * a carry, and it is what makes a quiet lane look like men waiting rather
+     * than men frozen mid-engagement. */
+    if (!o.moving && !o.combat && !o.pose && C.rest && C.rest.length) {
+      const n = C.rest.length;
+      const t = (o.time || 0) * 0.42 + (o.gaitOff || 0);
+      const q = ((t % 1) + 1) % 1 * n;
+      return ['rest', Math.floor(q) % n, q - Math.floor(q)];
+    }
     if (o.moving) {
       // Foot-skate is the main thing that reads as "janky", so the gait cycle is
       // sized to the ground actually covered rather than to a fixed rate. Units
