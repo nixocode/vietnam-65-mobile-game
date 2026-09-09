@@ -153,6 +153,14 @@ LOOPING = {'idle', 'idle2', 'run', 'runfire', 'walk', 'prone', 'fallback',
 # together; lifting `Head` puts the face back along the barrel. Both were swept
 # and looked at — see the note on foot_follow for why the first attempt at this
 # fixup silently did nothing.
+#
+# WHAT DOES NOT RETARGET: anything that drives the FEET. `Run_Gun` was tried as
+# an `advance` and rendered legs stretched into ribbons trailing off the frame.
+# It drives 19 bones against Duck's 11, and the extra ones are foot and
+# pole-target channels carrying positions from a rig with different proportions;
+# the host's legs stretch trying to reach them. `Duck` transfers cleanly because
+# it is rotations only and touches no foot at all. Check the bone count and the
+# channel list before adding an entry here — the ones that work are small.
 FOREIGN = {
     'kneel': ('weapons.glb', 'Duck', 0.30, 0.62, -26.0, 26.0),
     # PRONE is the same crouch taken deeper and leaned further forward. It is
@@ -1233,7 +1241,6 @@ def load_foreign_action(fname, want):
         print('FOREIGN import failed', fname, exc)
         return None
     fresh = [a for a in bpy.data.actions if a.name not in before]
-    print('FOREIGN fresh actions:', [a.name for a in fresh])
     act = next((a for a in fresh if want.lower() in a.name.lower()), None)
     if act:
         act.use_fake_user = True
