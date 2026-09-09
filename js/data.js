@@ -37,6 +37,27 @@ const STANCE_TRANS = 0.28;
  * minute, short dwells 11.99% vs 12.15%). It is not free either — a man who has
  * genuinely halted keeps running on the spot for that long. Left at 0.16. */
 const MOVE_HOLD = 0.16;
+/* THE SETTLE BAND IS A SCHMITT TRIGGER, not one threshold.
+ *
+ * A man walks to his formation slot and stops inside MOVE_STOP of it. The slot
+ * is computed from the squad anchor, which jitters — the separator nudges it,
+ * casualties re-centre it — so with a single threshold the man crossed the line
+ * back and forth and his `moving` flag chattered. Measured: the worst man
+ * toggled it 517 times a minute, 8.6 times a SECOND.
+ *
+ * That flag is the root input of everything downstream. MOVE_HOLD debounces it
+ * into `movingVis`, `movingVis` drives the stance machine and the drawn pose,
+ * and the renderer picks a walk cycle off it — so chatter here surfaced as men
+ * strobing between postures no matter how much commitment was added further
+ * down the chain.
+ *
+ * Two thresholds fix what one could not. Stop when you are within MOVE_STOP;
+ * do not set off again until you are MOVE_START out. The gap is the hysteresis,
+ * and 9px is under a fifth of the 50px slot spacing, so nobody sits visibly out
+ * of formation. Raising the single threshold was tried before and did nothing,
+ * because it moves the line without stopping the crossing. */
+const MOVE_STOP = 2.5;
+const MOVE_START = 9;
 /* How soon a man may DROP BACK into a ground pose after leaving one.
  *
  * The stance machine commits — 2.4s prone, 1.6s kneel, 1.1s standing — but the

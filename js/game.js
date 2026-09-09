@@ -2735,7 +2735,9 @@ class Game {
      * ground before they meet. That is a pacing question about how far a squad
      * advances before it halts, and it will not be solved by a threshold here.
      */
-    if (Math.abs(dx) < 2.5 && !marching) {
+    // hysteresis, see MOVE_STOP / MOVE_START
+    const band = u.moving ? MOVE_STOP : MOVE_START;
+    if (Math.abs(dx) < band && !marching) {
       u.moving = false;
       u.spd = 0;
       return;
