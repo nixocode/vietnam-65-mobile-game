@@ -77,7 +77,7 @@ function build() {
     .map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n;\n');
   const ctx = vm.createContext(sandbox);
   // one script, so the files share a lexical scope the way <script> tags do
-  vm.runInContext(src + '\n;globalThis.__api = { Game, UNITS, SQUADS, MAPS, COVER, GRENADE, M79, Tutor };',
+  vm.runInContext(src + '\n;globalThis.__api = { Game, UNITS, SQUADS, MAPS, COVER, GRENADE, M79, Tutor, WORLD_W, LANE_N };',
                   ctx, { filename: 'vietnam-sim.js' });
   return { api: sandbox.__api, sound: sandbox.Sound };
 }

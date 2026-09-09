@@ -37,6 +37,36 @@ const STANCE_TRANS = 0.28;
  * minute, short dwells 11.99% vs 12.15%). It is not free either — a man who has
  * genuinely halted keeps running on the spot for that long. Left at 0.16. */
 const MOVE_HOLD = 0.16;
+/* Clear ground between two friendly formations in the same lane.
+ *
+ * ONE constant, because two places need it and they disagreed. `_separate`
+ * holds squads SEP_GAP apart while `_squadPathClear` refused to advance below
+ * 44 — the wrong way round — so a squad parked in the 44-46 band was told to
+ * go, moved, was pushed straight back, and did it again. Measured one squad
+ * advancing 841px across 601 ticks without its position changing at all, and
+ * flagged `_advancing` on every one of those ticks, so its men marched on the
+ * spot for ten seconds of wall clock at a stretch. */
+const SEP_GAP = 46;
+/* SEP_CLEAR IS NEGATIVE ON PURPOSE, AND IT WAS MEASURED.
+ *
+ * Closing the band properly — SEP_CLEAR = 6, so a squad stops 52px behind the
+ * one ahead instead of shoving at it — removes the treadmill and makes the game
+ * WORSE. Three runs per condition, five maps, seven-minute matches:
+ *
+ *                       SEP_CLEAR=6        SEP_CLEAR=-2
+ *     late-game firing   14.1 [12-16]      20.7 [17-27]
+ *     firing             14.6 [13-16]      18.0 [16-22]
+ *     worst freeze       316.3s            316.0s
+ *
+ * The shoving is load-bearing. A squad pressed up against the one in front
+ * fills the gap the instant it opens; a squad that has stopped 52px back has to
+ * decide to move again, and mostly does not. It also fixes no freeze at all —
+ * the worst case is identical either way.
+ *
+ * So the treadmill stays. It is a real defect and this is not a defence of it:
+ * anything better has to keep squads PUSHING, which means letting them pass or
+ * spread rather than politely queueing. */
+const SEP_CLEAR = -2;
 
 
 // Seconds a squad spends crossing between lanes. Long enough that the move is a

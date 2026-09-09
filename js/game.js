@@ -1024,6 +1024,7 @@ class Game {
         const screened = this.smokeAt(s.lane, s.x) > 0.35 ||
           this.smokeAt(s.lane, s.x + s.dir * 70) > 0.35;
         const mayMove = hostileFire === 0 || covering || s.inCover || screened;
+
         if (!s.pinned && !engaged && this._squadPathClear(s) && mayMove) {
           /* THE PACING QUESTION, ANSWERED AND THEN LEFT ALONE.
            *
@@ -1050,6 +1051,12 @@ class Game {
       }
       // hard-sync anchor if men drifted (breakthrough removal etc.)
       if (Math.abs(this.squadAnchor(s) - s.x) > 90) s.x = this.squadAnchor(s);
+      /* NOBODY LEAVES THE MAP. A backstop, not the fix — the formation bug that
+       * used to send squads to x=12091 is fixed at its source in `_advance` —
+       * but a squad outside the world can never be in range of anything, so if
+       * one ever gets there again it should be a visible pile-up at the edge
+       * rather than an army quietly walking into nothing. */
+      s.x = clamp(s.x, -20, WORLD_W + 20);
 
       // GROUND IS NEVER GIVEN UP by accident. Losing the point man used to drag
       // the squad's anchor rearward, which read as troops wandering backwards
@@ -1062,7 +1069,29 @@ class Game {
         if ((s.x - s.front) * s.dir > 0) s.front = s.x;
         else if ((s.front - s.x) * s.dir > 16) s.x = s.front - s.dir * 16;
       }
-      s._advancing = Math.abs(s.x - xBefore) > 0.01;
+      /* ADVANCING MEANS MAKING GROUND, not "moved during this tick".
+       *
+       * This was `Math.abs(s.x - xBefore) > 0.01`, measured inside the tick and
+       * therefore BEFORE `_separate` runs. A squad shoving at the back of the
+       * one in front advances a pixel and is pushed the pixel back a moment
+       * later, so it stood still while reporting `_advancing` on every single
+       * tick, forever (see SEP_CLEAR in data.js for the measurement).
+       *
+       * That flag is what lets a prone man get up early — the rising bypass
+       * below trusts it to mean the squad is going somewhere. Permanently true
+       * meant permanently bypassed, so men dropped and popped back up every
+       * 0.35s while the squad went nowhere. It is the churn the stance locks
+       * exist to prevent, arriving through the one door left open for it.
+       *
+       * Sampling over 0.3s asks the question the consumers actually mean: has
+       * this squad got anywhere lately? A treadmilling squad has not. */
+      s._advSampleT = (s._advSampleT || 0) + dt;
+      if (s._advSampleX === undefined) { s._advSampleX = s.x; s._advancing = false; }
+      if (s._advSampleT >= 0.3) {
+        s._advancing = (s.x - s._advSampleX) * s.dir > 1;
+        s._advSampleX = s.x;
+        s._advSampleT = 0;
+      }
       this._updateCoverClock(s, dt, Math.abs(s.x - xBefore) > 0.6);
 
       /* OVER THE TOP. The lever is thrown, so the garrison climbs out and goes
@@ -1201,7 +1230,7 @@ class Game {
   _separate(dt) {
     // Raised with the slot spacing: two squads 26px apart still interleaved
     // their outer men once each formation got wider.
-    const GAP = 46;              // clear ground between two formations
+    const GAP = SEP_GAP;         // clear ground between two formations
     const RATE = 2.4;
     const byLane = new Map();
     for (const s of this.squads) {
@@ -1661,7 +1690,9 @@ class Game {
       if (o === s || o.side !== s.side || o.lane !== s.lane) continue;
       if (!this.squadAlive(o).length) continue;
       const gap = (o.x - s.x) * s.dir;
-      if (gap > 0 && gap < 44) return false;
+      // SEP_GAP + SEP_CLEAR, never a number of its own: the separator holds
+      // squads SEP_GAP apart, so a threshold below that is a treadmill.
+      if (gap > 0 && gap < SEP_GAP + SEP_CLEAR) return false;
     }
     return true;
   }
@@ -2590,7 +2621,34 @@ class Game {
        * men in a lane was 14px, and a zoomed contact showed a ten-man squad as
        * a single stack of bodies rather than a firing line. A firefight cannot
        * read if you cannot count the men in it. */
-      tx = s.x - u.dir * u.slot * 50;
+      /* CENTRED ON THE ANCHOR, AND INDEXED ON THE LIVING.
+       *
+       * This was `s.x - u.dir * u.slot * 50`, and `u.slot` is handed out once
+       * at spawn (`m.slot = i`) and never revised as men die. Two things follow,
+       * and the second one broke matches.
+       *
+       * The anchor is the MEAN of the living men. Slots laid out behind the
+       * anchor have a mean that is not the anchor — half the squad's width
+       * behind it — so `squadAnchor(s)` and `s.x` disagreed permanently, and
+       * once the gap passed 90 the hard-sync below yanked the squad backwards
+       * onto its own men, every tick, for every full-strength squad.
+       *
+       * Worse, when a squad is down to ONE man the anchor IS that man. The last
+       * survivor of a five-man squad still held slot 4, so he wanted to stand
+       * 200px off the anchor, walked there, dragged the anchor with him because
+       * he was the anchor, and did it again — a positive feedback loop that
+       * marched lone survivors clean off the map. Traced one to x=12091 in a
+       * 2560-wide world, at which point it is out of everyone's range forever
+       * and simply stops fighting. Squads accumulated in that state as matches
+       * ran on, which is why the field went quiet towards the end.
+       *
+       * Centring on the live index makes mean(slots) exactly s.x, which is the
+       * invariant the hard-sync assumes, and puts a lone man on the anchor
+       * rather than 200px off it. It is what the in-cover branch above has
+       * always done. */
+      const alive = this.squadAlive(s);
+      const idx = Math.max(0, alive.indexOf(u));
+      tx = s.x - s.dir * (idx - (alive.length - 1) / 2) * 50;
     }
     const dx = tx - u.x;
     const marching = s && s._advancing; // the squad itself is on the move
