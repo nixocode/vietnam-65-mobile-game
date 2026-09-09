@@ -37,6 +37,48 @@ const STANCE_TRANS = 0.28;
  * minute, short dwells 11.99% vs 12.15%). It is not free either — a man who has
  * genuinely halted keeps running on the spot for that long. Left at 0.16. */
 const MOVE_HOLD = 0.16;
+/* How soon a man may DROP BACK into a ground pose after leaving one.
+ *
+ * The stance machine commits — 2.4s prone, 1.6s kneel, 1.1s standing — but the
+ * drawn pose was recomputed every frame straight from `movingVis` and honoured
+ * none of it. So a man whose movement flag flickered as he settled into his
+ * slot popped between kneeling and standing at the debounce rate: measured, the
+ * worst man changed pose 109 times a minute, one every 0.55s, while his STANCE
+ * sat still and looked perfectly healthy in the churn metric.
+ *
+ * Asymmetric on purpose. Standing up is instant, because a man who slides along
+ * the ground still kneeling is worse than one who stands a frame early. Going
+ * back down waits, because that is the half of the cycle that flickers.
+ *
+ * 1.2 because the STANDING stance lock is 1.1s: the pose can never usefully
+ * re-enter faster than the stance machine can decide to, so anything shorter is
+ * just letting the flicker through, and anything longer makes the drawn pose
+ * lag a decision that has already been taken. Swept, worst-man pose flips:
+ *
+ *     0.5 -> 63.5/min    1.0 -> 49.7    1.6 -> 34.9
+ *
+ * with the share of men in a fighting posture flat at ~10% throughout, so the
+ * commitment costs no postures — it only stops them strobing. */
+const POSE_SETTLE = 1.2;
+/* How long a man stays down after his last shot before standing up.
+ *
+ * This was a bare `m.stanceT > 3` in the stance machine, and it is the engine
+ * of the game's remaining stance churn. A firefight is not continuous — men
+ * reload, lose the target, wait for it to show again — so `combatT` drops to
+ * zero constantly, and at three seconds the man stood up, re-acquired, and went
+ * straight back down. Traced the worst man: 58 changes across 115 seconds, one
+ * every 2s, alternating kneel-stand-prone-stand while never once moving.
+ *
+ * A soldier who has been shooting does not stand up three seconds after the
+ * last round. He stays down while contact is still plausible.
+ *
+ * SWEPT AND LEFT AT 3. Raising it barely moves the churn it was suspected of
+ * causing — worst-man stance flips 44.8 -> 42.6 (7s) -> 43.9 (12s) — because
+ * this rule accounts for only 3% of all stance transitions. The real drivers
+ * are movement (20%) and the squad advancing (18%), which are men standing up
+ * to move and dropping to fight, i.e. bounding, i.e. correct. Named and
+ * documented rather than tuned, so the next person can see it was measured. */
+const STAND_DOWN = 3;
 /* Clear ground between two friendly formations in the same lane.
  *
  * ONE constant, because two places need it and they disagreed. `_separate`
@@ -47,26 +89,31 @@ const MOVE_HOLD = 0.16;
  * flagged `_advancing` on every one of those ticks, so its men marched on the
  * spot for ten seconds of wall clock at a stretch. */
 const SEP_GAP = 46;
-/* SEP_CLEAR IS NEGATIVE ON PURPOSE, AND IT WAS MEASURED.
+/* SEP_CLEAR keeps the two thresholds consistent: the separator holds squads
+ * SEP_GAP apart, so the path check must refuse anything below that, or a squad
+ * in the band advances and is pushed back forever.
  *
- * Closing the band properly — SEP_CLEAR = 6, so a squad stops 52px behind the
- * one ahead instead of shoving at it — removes the treadmill and makes the game
- * WORSE. Three runs per condition, five maps, seven-minute matches:
+ * AN EARLIER NOTE HERE SAID THE OPPOSITE, on a measurement that was wrong.
+ * It reported that closing the band cost late-game firing 20.7% -> 14.1% and so
+ * the shoving was load-bearing. That run drove matches for 420 seconds when
+ * matches END at 94-191s, and `update()` early-returns once `over` is set — so
+ * most of every sample was frozen post-match state, and "late game" (t>240s)
+ * was entirely after the final whistle on every map.
  *
- *                       SEP_CLEAR=6        SEP_CLEAR=-2
- *     late-game firing   14.1 [12-16]      20.7 [17-27]
- *     firing             14.6 [13-16]      18.0 [16-22]
- *     worst freeze       316.3s            316.0s
+ * Re-measured stopping at `over`, three runs per condition, the choice makes no
+ * difference at all:
  *
- * The shoving is load-bearing. A squad pressed up against the one in front
- * fills the gap the instant it opens; a squad that has stopped 52px back has to
- * decide to move again, and mostly does not. It also fixes no freeze at all —
- * the worst case is identical either way.
+ *                    SEP_CLEAR=-2     SEP_CLEAR=6
+ *     worst freeze      53.0s            54.3s
+ *     treadmill          0.3%             0.2%
+ *     firing            10.7%            10.0%
+ *     firing >90s       15.1%            16.0%
  *
- * So the treadmill stays. It is a real defect and this is not a defence of it:
- * anything better has to keep squads PUSHING, which means letting them pass or
- * spread rather than politely queueing. */
-const SEP_CLEAR = -2;
+ * The treadmill it was arguing about is gone anyway — it was caused by the
+ * formation-slot feedback loop, not by these two numbers, and fixing that took
+ * it from 33% of squad-samples to 0.2%. So this is now simply the consistent
+ * value, chosen because two constants that must agree should agree. */
+const SEP_CLEAR = 6;
 
 
 // Seconds a squad spends crossing between lanes. Long enough that the move is a

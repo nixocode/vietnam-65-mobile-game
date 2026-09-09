@@ -1088,10 +1088,13 @@ class Game {
       s._advSampleT = (s._advSampleT || 0) + dt;
       if (s._advSampleX === undefined) { s._advSampleX = s.x; s._advancing = false; }
       if (s._advSampleT >= 0.3) {
+        const was = s._advancing;
         s._advancing = (s.x - s._advSampleX) * s.dir > 1;
+        if (s._advancing && !was) s._advSince = 0;      // the moment it stepped off
         s._advSampleX = s.x;
         s._advSampleT = 0;
       }
+      s._advSince = s._advancing ? (s._advSince || 0) + dt : 1e9;
       this._updateCoverClock(s, dt, Math.abs(s.x - xBefore) > 0.6);
 
       /* OVER THE TOP. The lever is thrown, so the garrison climbs out and goes
@@ -1141,13 +1144,27 @@ class Game {
          * it — squads are three to five men, so `mi < 2` is most of them, and
          * kneeling never fired at all. It now applies only under fire. */
         const hot = s.underFireT > 0 || s.pinned;
-        if (m.moving || s._advancing) want = 'stand';
+        /* THE DEBOUNCED FLAG, not the raw one.
+         *
+         * `m.moving` flickers sub-100ms as men settle into their slots — that
+         * is why `movingVis` exists at all, and why the renderer has used it
+         * for years. The stance machine was still reading the raw flag, so
+         * every flicker was a vote for 'stand' and the commitment locks were
+         * being asked to absorb noise the debounce already removes. It holds
+         * last frame's value here (movingVis is computed further down), which
+         * is exactly what a debounce is for.
+         *
+         * Measured as NEUTRAL, and kept anyway: mean stance churn 9.13 -> 8.71
+         * per man-minute, worst-man 23.9 -> 25.2, both inside the run-to-run
+         * spread of a metric that is a max over thousands of men. This is here
+         * for consistency with the renderer, not on the strength of a number. */
+        if (m.movingVis || s._advancing) want = 'stand';
         else if (s.pinned) want = 'prone';
         else if (s.inCover && (engaged || hot)) want = 'prone';   // gun on the parapet
         else if (hot && nearFoe < 150) want = 'prone';
         else if (hot && mi < 2) want = 'prone';                   // front rank eats it first
         else if (hot || engaged || (m.combatT || 0) > 0) want = 'kneel';
-        else if ((m.combatT || 0) <= 0 && m.stanceT > 3) want = 'stand';
+        else if ((m.combatT || 0) <= 0 && m.stanceT > STAND_DOWN) want = 'stand';
         /* The commitment lock exists so nobody yo-yos.
          *
          * `|| m.moving` bypassed it for ANY change, in either direction. Because
@@ -1175,8 +1192,31 @@ class Game {
          * `_advancing` is squad-level and stable across frames, and it is the
          * thing the exemption was always FOR: a prone squad ordered forward has
          * to get on its feet at once. A lone man's slot-shuffle is not that. */
+        /* THE BYPASS IS FOR STEPPING OFF, NOT FOR BEING IN MOTION.
+         *
+         * It read `rising && s._advancing`, which is true for as long as the
+         * squad keeps moving — so a man could stand 0.35s after going prone,
+         * over and over. That is the churn: prone -> stand costs 0.35s and
+         * stand -> prone costs the 1.1s stand lock, a 1.45s cycle, and the
+         * worst man measured 43.9 flips a minute against a 1.45s cycle of
+         * exactly 41. The dominant transition pair in the whole game was
+         * stand<->prone, 1406 of 2598.
+         *
+         * Limiting it to the first 0.9s of an advance keeps what the exemption
+         * is FOR — a prone squad ordered forward gets on its feet at once —
+         * and hands the rest back to the commitment locks. */
+        /* BOTH conditions, and the first attempt had only the second.
+         *
+         * `_advSince < 0.9` stays true for 0.9s AFTER an advance ends, so a
+         * squad that shuffled forward and stopped left the bypass armed while
+         * its men were standing still — and a stationary man could then rise
+         * from prone after 0.35s, drop again, and repeat on a ~1.5s cycle.
+         * Measured 33.9 stance changes a minute for the worst man WHILE
+         * STATIONARY, which is precisely the on-the-spot pumping this whole
+         * lock exists to stop. */
+        const steppingOff = s._advancing && (s._advSince || 1e9) < 0.9;
         if (want !== m.stance &&
-            (m.stanceT >= lock || (rising && s._advancing && m.stanceT >= 0.35))) {
+            (m.stanceT >= lock || (rising && steppingOff && m.stanceT >= 0.35))) {
           const prev = m.stance;
           m.stance = want;
           m.stanceT = 0;
@@ -1281,8 +1321,15 @@ class Game {
 
       if (u.sniperUnit || (u.nadeT || 0) > 0) continue;
       if (UNITS[u.key].vehicle) { u.pose = null; continue; }
-      u.pose = u.movingVis ? null
+      /* See POSE_SETTLE. Standing up is immediate; dropping back down has to
+       * wait, so a flickering movement flag cannot pump a man up and down. */
+      const wantPose = u.movingVis ? null
         : (u.stance === 'prone' ? 'prone' : u.stance === 'kneel' ? 'kneel' : null);
+      u.poseT = (u.poseT || 0) + dt;
+      if (wantPose !== u.pose && (wantPose === null || u.poseT >= POSE_SETTLE)) {
+        u.pose = wantPose;
+        u.poseT = 0;
+      }
     }
   }
 

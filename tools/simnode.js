@@ -37,6 +37,21 @@ function build() {
     Math,
     Date,
     window: {},
+    /* TIMERS, because their absence hid a whole code path.
+     *
+     * `tryCallin` schedules the jet flyby with setTimeout, and setTimeout does
+     * not exist inside a bare vm context — so the air strike threw
+     * ReferenceError the first time the AI ever called one. Every sweep short
+     * enough to avoid a call-in passed, and the one path in the game that
+     * spends a player's hard currency was never once executed here.
+     *
+     * Run the callback immediately rather than deferring: the sim has no event
+     * loop to come back to, and every current use is a fire-and-forget sound. */
+    setTimeout: (fn) => { try { fn(); } catch (e) { /* stubbed Sound only */ } return 0; },
+    clearTimeout: () => {},
+    setInterval: () => 0,
+    clearInterval: () => {},
+    requestAnimationFrame: () => 0,
     localStorage: {
       _d: {},
       getItem(k) { return Object.prototype.hasOwnProperty.call(this._d, k) ? this._d[k] : null; },
