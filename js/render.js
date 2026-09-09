@@ -774,9 +774,28 @@ const Renderer = {
      * initial value is 0.8 (see `renderScale` above) and the floor drops to
      * 0.5, because a mid-range Android that cannot hold 0.62 should get a
      * softer picture rather than a stuttering one. */
-    if (med > 19 && this.renderScale > 0.5) this.renderScale -= 0.1;
-    else if (med < 11.5 && this.renderScale < 1) this.renderScale += 0.05;
-    this.renderScale = clamp(this.renderScale, 0.5, 1);
+    /* THE TARGET IS 60, AND IT USED TO BE 52.
+     *
+     * This stepped down only while the median frame was over 19ms. 19ms IS
+     * 52fps — so the moment a phone reached 52 the scaler stopped, and no
+     * amount of resolution it could still have traded ever bought the player
+     * 60. The desktop tree had the same defect at 21ms / 47fps.
+     *
+     * SLOW is now just above the 16.67ms budget. FAST stays put, so the two
+     * keep a wide hysteresis band and the resolution does not pump.
+     *
+     * The FLOOR drops to 0.38: a phone that cannot hold 60 at half resolution
+     * has nowhere else to go, and on a 5-inch screen the softness costs far
+     * less than the judder does. The step scales with how far over budget we
+     * are, so a bad device converges in one or two moves rather than inching
+     * down while the player watches a slideshow. */
+    const SLOW = 17.5, FAST = 11.5, FLOOR = 0.38;
+    if (med > SLOW && this.renderScale > FLOOR) {
+      this.renderScale -= med > SLOW * 2 ? 0.2 : 0.1;
+    } else if (med < FAST && this.renderScale < 1) {
+      this.renderScale += 0.05;
+    }
+    this.renderScale = clamp(this.renderScale, FLOOR, 1);
     if (Math.abs(this.renderScale - before) > 0.001) {
       this._rsHold = 1.1;          // settle before judging again
       this.fitDPR();

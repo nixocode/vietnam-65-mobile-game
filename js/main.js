@@ -151,6 +151,16 @@ const App = {
     });
     document.addEventListener('pointerdown', () => Sound.init(), { once: false });
     document.addEventListener('keydown', e => this._onKey(e));
+    /* ?perf=1 — the frame readout, for devices with no keyboard.
+     *
+     * The overlay has always existed and has always been reachable only from a
+     * keydown, so on a phone — the hardware most likely to be struggling and
+     * the only place the answer matters — there was no way to see it at all.
+     * A query flag needs no button, cannot be hit by accident, and survives the
+     * reload it takes to get into fullscreen. */
+    try {
+      if (/[?&]perf=1\b/.test(location.search)) Renderer.showPerf = true;
+    } catch (e) { /* location is always there; belt and braces */ }
     requestAnimationFrame(t => this._frame(t));
   },
 
