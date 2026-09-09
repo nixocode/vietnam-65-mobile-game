@@ -5024,17 +5024,20 @@ const Renderer = {
         const a = LANE_DEPTH[u.crossFrom], b = LANE_DEPTH[u.lane];
         scale = (a + (b - a) * u.crossK) * (u.sj || 1);
       }
-      /* The prone pose is now `dive` frame 1, which is ALREADY a low posture —
-       * a man pitched forward on his way to the ground — where the old one was
-       * the standing `aim` pose that had to be shoved 26px down the screen to
-       * pretend. Dropping this one that far buries him to the waist. 9px seats
-       * him without sinking him. See Sprite3D._sel. */
-      /* 15, not 9. Prone and kneel now share the crouch frame (see the note in
-       * Sprite3D._sel), so the DROP is the only thing separating them — a man
-       * down has to sit visibly lower than a man on one knee or the two
-       * postures are indistinguishable. */
-      const proneDrop = u.pose === 'prone' ? 15 * scale
-        : u.pose === 'kneel' ? 3 * scale : 0;
+      /* NEARLY ZERO NOW, and that is the point.
+       *
+       * This started at 26px because `prone` was the STANDING aim pose and the
+       * only way to suggest a man on the ground was to shove him down the
+       * screen. It went to 9, then back up to 15 when prone and kneel came to
+       * share a single crouch frame and the drop was the only thing telling
+       * them apart.
+       *
+       * Both are real rendered postures now (see FOREIGN in
+       * tools/render_model_sprites.py), each already sitting at its own height
+       * with its feet on the ground. Dropping them further just buries them —
+       * so this keeps a token 3px on prone, for the ground contact a sprite
+       * cannot show, and nothing at all on kneel. */
+      const proneDrop = u.pose === 'prone' ? 3 * scale : 0;
       /* RECOIL — a per-shot kick on the whole man.
        *
        * The vector rig has swapped recoil FRAMES off `muzzleT` since it was

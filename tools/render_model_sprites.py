@@ -45,6 +45,12 @@ HEIGHT = float(arg('--height', '1.8'))
 ORTHO_K = 1.5
 CAM_ZK = 0.52
 ONLY = [c for c in (arg('--only', '') or '').split(',') if c]
+# prone pose angles: lay-out, torso prop, head, left leg, right leg
+PRONE_ANGLES = [float(v) for v in
+                arg('--prone', '78,-26,-34,9,-5').split(',')]
+# kneel fixup: torso lift, head lift — see KNEEL_FIX use below
+KNEEL_FIX = [float(v) for v in arg('--kneel', '0,0').split(',')]
+POSED_PRONE = '--posed-prone' in sys.argv
 NORENDER = '--norender' in argv   # re-derive muzzle points without redrawing frames
 
 # ---- portrait mode — BUILT, EVALUATED, NOT THE SHIPPING PATH -------------
@@ -119,8 +125,55 @@ CLIP_FRAMES = {'idle': 6, 'aim': 6, 'fire': 7, 'run': 24,
                # used. Listed straight out of the .glb while hunting for a
                # prone: Run_Back, Run_Left, Run_Right, Interact and Wave were
                # all sitting there unmined.
-               'fallback': 14, 'rest': 6}
-LOOPING = {'idle', 'idle2', 'run', 'runfire', 'walk', 'prone', 'fallback', 'rest'}
+               'fallback': 14, 'rest': 6,
+               # Retargeted from weapons.glb — see FOREIGN below.
+               'kneel': 5}
+LOOPING = {'idle', 'idle2', 'run', 'runfire', 'walk', 'prone', 'fallback',
+           'rest', 'kneel'}
+
+# CLIPS BORROWED FROM A DIFFERENT DONOR FILE.
+#
+# The six character donors all ship the SAME twenty-four mocap clips, and the
+# long-standing note that "the donor has no crouch, kneel or prone" was checked
+# against those twenty-four and was true of them. It was never checked against
+# `weapons.glb`, which is a seventh rig with a COMPLETELY DIFFERENT set of
+# fourteen — including `Duck`, a real crouch, which is exactly the clip eight
+# attempts at hand-posing a kneel failed to produce.
+#
+# Its body is unusable (chunky cartoon proportions, huge head) but its ANIMATION
+# is fine, because Blender matches F-curves by bone NAME and all eleven bones
+# `Duck` drives exist on the character rigs under the same names.
+#
+#   name: (source file, action, start frac, end frac, torso lift, head lift)
+#
+# The fractions cut out the settle-in and stand-up at either end and keep the
+# held middle of the crouch. The two angles then fix what `Duck` is FOR: it is a
+# dodge, so the head is tucked down between the shoulders and the weapon rides
+# up with it. Lifting `Torso` brings chest, arms, head and weapon back level
+# together; lifting `Head` puts the face back along the barrel. Both were swept
+# and looked at — see the note on foot_follow for why the first attempt at this
+# fixup silently did nothing.
+FOREIGN = {
+    'kneel': ('weapons.glb', 'Duck', 0.30, 0.62, -26.0, 26.0),
+    # PRONE is the same crouch taken deeper and leaned further forward. It is
+    # not a true prone — this donor set has no such clip and eight attempts at
+    # posing one have failed (see _prone_pose). What it IS, for the first time,
+    # is a posture genuinely distinct from the kneel: before this, `prone` and
+    # `kneel` were both frame 0 of `dive` and differed only by the renderer
+    # drawing one of them lower.
+    'prone': ('weapons.glb', 'Duck', 0.44, 0.56, -44.0, 40.0),
+}
+
+# Bones that must be made to follow a parent they do not actually have.
+#
+# On the character rigs Foot.L/R and PT.L/R hang off Root rather than off the
+# shin — the donor's own cycles animate them directly, so the rig never needed
+# the parenting. A foreign clip that drives only the leg ROTATIONS therefore
+# bends the knee while the shoe stays where it was, and the mesh stretches
+# between them into a long smear. Capturing each foot's rest offset relative to
+# its shin and re-applying it per frame is that missing parenting.
+FOLLOW = (('Foot.L', 'LowerLeg.L'), ('Foot.R', 'LowerLeg.R'),
+          ('PT.L', 'LowerLeg.L'), ('PT.R', 'LowerLeg.R'))
 
 # Clips where the donor is NOT holding a gun — Idle_Gun drops the arm to the
 # soldier's side and Walk is empty-handed, so the rifle ends up hidden behind a
@@ -171,6 +224,8 @@ STATE_ACTIONS = {
 MODEL_FOR = {
     'rifleman':  'soldier',     'arvn':     'casual',
     'm60':       'adventurer',  'engineer': 'swat',
+    # the grenadier is a plain rifleman body; the WEAPON is the whole point
+    'grenadier': 'soldier',
     # sniper gets `worker`, the one donor in art/models nothing used. It shared
     # `soldier` with the rifleman, so the two most common US figures on screen
     # were the same body — and a sniper reading as "just another rifleman" is
@@ -203,6 +258,7 @@ SKIN_TONE = {'Skin': (0.300, 0.186, 0.108), 'Skin_Darker': (0.232, 0.142, 0.082)
 
 # units that share another unit's faction colours
 PAL_ALIAS = {'m60': 'rifleman', 'engineer': 'rifleman', 'recon': 'rifleman',
+             'grenadier': 'rifleman',
              'sniper': 'rifleman', 'rpd': 'nva', 'sapper': 'guerrilla',
              'marksman': 'guerrilla', 'rpgman': 'nva'}
 
@@ -268,6 +324,8 @@ GEAR = {
     'nva':       ('ak', 'pith'),
     'm60':       ('m60', 'm1'),
     'engineer':  ('m16', 'm1'),
+    # the M79 mesh has existed since the weapon was added; nothing carried it
+    'grenadier': ('m79', 'm1'),
     'recon':     ('m16', 'boonie'),
     'sniper':    ('m40', 'boonie'),
     'rpd':       ('m60', 'pith'),
@@ -1093,16 +1151,17 @@ def arm_of():
     return [o for o in bpy.data.objects if o.type == 'ARMATURE'][0]
 
 
-def render_clip(name, action, sc, pose_fn=None):
+def render_clip(name, action, sc, pose_fn=None, span=None):
     arms = [o for o in bpy.data.objects if o.type == 'ARMATURE']
     if not arms:
         raise SystemExit('no armature — the model must be rigged')
     arm = arms[0]
     if action:
-        if not arm.animation_data:
-            arm.animation_data_create()
-        arm.animation_data.action = action
+        bind_action(arm, action)
         s, e = action.frame_range
+        if span:                      # keep only the middle of a foreign clip
+            a, b = span
+            s, e = s + (e - s) * a, s + (e - s) * b
     else:
         s, e = 1, 1
     ortho = HEIGHT * ORTHO_K
@@ -1143,14 +1202,163 @@ def render_clip(name, action, sc, pose_fn=None):
     return made
 
 
-def _pitch(arm, name, deg, pivot=None):
-    """Rotate a bone about the model's pitch axis, in place by default."""
+def _all_fcurves(act):
+    """Blender 5 moved F-curves under layers/strips/channelbags (slotted
+    actions); older files expose act.fcurves directly. Handle both."""
+    if len(getattr(act, 'fcurves', []) or []):
+        return list(act.fcurves)
+    out = []
+    for lay in getattr(act, 'layers', []):
+        for st in getattr(lay, 'strips', []):
+            for cb in getattr(st, 'channelbags', []):
+                out.extend(cb.fcurves)
+    return out
+
+
+def load_foreign_action(fname, want):
+    """Import another .glb purely for one of its actions, then bin its objects.
+
+    Returns the action, or None if the file or the clip is not there — a missing
+    donor must not take the whole render down, it just means one clip is absent.
+    """
+    path = os.path.join(ROOT, 'art', 'models', fname)
+    if not os.path.isfile(path):
+        print('FOREIGN missing file', path)
+        return None
+    keep = {o.name for o in bpy.data.objects}
+    before = {a.name for a in bpy.data.actions}
+    try:
+        bpy.ops.import_scene.gltf(filepath=path)
+    except Exception as exc:
+        print('FOREIGN import failed', fname, exc)
+        return None
+    fresh = [a for a in bpy.data.actions if a.name not in before]
+    print('FOREIGN fresh actions:', [a.name for a in fresh])
+    act = next((a for a in fresh if want.lower() in a.name.lower()), None)
+    if act:
+        act.use_fake_user = True
+    for o in [o for o in bpy.data.objects if o.name not in keep]:
+        bpy.data.objects.remove(o, do_unlink=True)
+    if not act:
+        print('FOREIGN no action %r in %s' % (want, fname))
+        return None
+    bones = {fc.data_path.split('"')[1] for fc in _all_fcurves(act)
+             if fc.data_path.startswith('pose.bones["')}
+    host = arm_of()
+    missing = sorted(b for b in bones if b not in host.pose.bones)
+    print('FOREIGN %s/%s drives %d bones, %d missing %s'
+          % (fname, want, len(bones), len(missing), missing))
+    return act
+
+
+def bind_action(arm, act):
+    """Assign an action AND bind a slot.
+
+    Assigning alone is enough for a model's own actions, whose slot identifier
+    already matches. A foreign action's slot is named for the rig it came from,
+    so nothing auto-binds and the armature silently evaluates at REST — which
+    looks exactly like a clip that rendered but did not animate.
+    """
+    if not arm.animation_data:
+        arm.animation_data_create()
+    arm.animation_data.action = act
+    slots = list(getattr(act, 'slots', []) or [])
+    if slots:
+        try:
+            arm.animation_data.action_slot = slots[0]
+        except Exception as exc:
+            print('slot bind failed', exc)
+    bpy.context.view_layer.update()
+
+
+def foot_follow(arm, lift=0.0, head_deg=0.0):
+    """Per-frame pose_fn: bake, fix up, then reattach the feet. See FOLLOW."""
+    had = arm.animation_data.action if arm.animation_data else None
+    slot = getattr(arm.animation_data, 'action_slot', None) if arm.animation_data else None
+    if arm.animation_data:
+        arm.animation_data.action = None
+    bpy.context.view_layer.update()
+    rel = {}
+    for child, parent in FOLLOW:
+        cb, pb = arm.pose.bones.get(child), arm.pose.bones.get(parent)
+        if cb and pb:
+            rel[child] = pb.matrix.inverted() @ cb.matrix
+    if had:
+        arm.animation_data.action = had
+        if slot:
+            try:
+                arm.animation_data.action_slot = slot
+            except Exception:
+                pass
+    bpy.context.view_layer.update()
+
+    def apply(_t):
+        """Bake this frame, THEN fix it up.
+
+        While an action is assigned, every view_layer.update() re-applies its
+        F-curves — including the one inside _pitch — so posing an action-driven
+        bone is undone in the same call that makes it. That is why the first
+        attempt at this fixup changed nothing visible while the foot-follow
+        worked: `Duck` drives Torso and Head but not Foot, so only the feet kept
+        their posing.
+
+        So the frame is baked to matrix_basis, the action detached, the bake
+        restored, and only then is the fixup applied to a rig nothing will
+        overwrite. The action goes back on at the top of the next frame.
+        """
+        ad = arm.animation_data
+        if had:                        # re-attach: the previous frame left it off
+            ad.action = had
+            if slot:
+                try:
+                    ad.action_slot = slot
+                except Exception:
+                    pass
+            bpy.context.view_layer.update()
+            bpy.context.scene.frame_set(bpy.context.scene.frame_current)
+            bpy.context.view_layer.update()
+
+        baked = {b.name: b.matrix_basis.copy() for b in arm.pose.bones}
+        if had:
+            ad.action = None
+        bpy.context.view_layer.update()
+        for name, mb in baked.items():
+            pb = arm.pose.bones.get(name)
+            if pb:
+                pb.matrix_basis = mb
+        bpy.context.view_layer.update()
+
+        # `Duck` is a dodge: the head is tucked down between the shoulders and
+        # the weapon rides up with it. Lifting `Torso` raises chest, arms, head
+        # and weapon together — it is an ancestor of Wrist.R, which is exactly
+        # why it works, because the gun rides a Child-Of on the wrist and
+        # follows the hand wherever the chest puts it.
+        if lift:
+            _pitch(arm, 'Torso', lift, axis='Z')
+        if head_deg:
+            _pitch(arm, 'Head', head_deg, axis='Z')
+        for child, parent in FOLLOW:
+            cb, pb = arm.pose.bones.get(child), arm.pose.bones.get(parent)
+            if cb and pb and child in rel:
+                cb.matrix = pb.matrix @ rel[child]
+        bpy.context.view_layer.update()
+    return apply
+
+
+def _pitch(arm, name, deg, pivot=None, axis='X'):
+    """Rotate a bone about `axis`, in place by default.
+
+    `pose_bone.matrix` is ARMATURE space and this rig is Y-up there, so X is the
+    camera's DEPTH axis and Z is the one that lays a figure out in the view
+    plane. Callers that want a visible pitch pass axis='Z'. The default stays X
+    because the standing tweaks that use it are rotating about depth on purpose.
+    """
     from mathutils import Matrix
     pb = arm.pose.bones.get(name)
     if not pb:
         return
     piv = pivot if pivot is not None else pb.matrix.translation.copy()
-    R = (Matrix.Translation(piv) @ Matrix.Rotation(math.radians(deg), 4, 'X')
+    R = (Matrix.Translation(piv) @ Matrix.Rotation(math.radians(deg), 4, axis)
          @ Matrix.Translation(-piv))
     pb.matrix = R @ pb.matrix
     bpy.context.view_layer.update()
@@ -1174,14 +1382,24 @@ def _prone_pose(arm, frozen, breath):
 
     # the legs hang off Body and the feet off Root, so laying the man out means
     # turning all of them about one pelvis pivot rather than just the spine
+    # Angles are overridable from the command line so the pose can be swept and
+    # LOOKED AT rather than argued about: --prone lay,prop,head,legL,legR
+    lay, prop, head, legL, legR = PRONE_ANGLES
+
     pelvis = arm.pose.bones['Body'].matrix.translation.copy()
     for b in ('Body', 'Foot.L', 'Foot.R', 'PT.L', 'PT.R'):
-        _pitch(arm, b, 84, pelvis)
+        _pitch(arm, b, lay, pelvis, axis='Z')
 
-    _pitch(arm, 'Chest', -30 + breath)   # prop the upper body on the elbows
-    _pitch(arm, 'Head', -44 - breath * 0.5)
-    _pitch(arm, 'UpperLeg.L', 10)        # legs trail apart for a stable base
-    _pitch(arm, 'UpperLeg.R', -4)
+    # The torso is propped from `Abdomen`, low in the spine. Every spine bone is
+    # an ancestor of Wrist.R, so there is no "safe" bone to lift the chest with
+    # — and there does not need to be: the weapon rides a Child-Of constraint on
+    # the wrist, which follows the hand through any parent rotation. Propping
+    # from low in the spine carries the shoulders, arms and weapon up together,
+    # which is what a man on his elbows actually does.
+    _pitch(arm, 'Abdomen', prop + breath, axis='Z')
+    _pitch(arm, 'Head', head - breath * 0.5, axis='Z')
+    _pitch(arm, 'UpperLeg.L', legL, axis='Z')   # legs trail apart for a stable base
+    _pitch(arm, 'UpperLeg.R', legR, axis='Z')
 
 
 # The posed kneel lived here and is deliberately gone.
@@ -1326,7 +1544,29 @@ def main():
             continue
         index['clips'][name] = render_clip(name, action, sc)
 
-    if not ONLY or 'prone' in ONLY:
+    # RETARGETED CLIPS, from a donor file this unit is not built from.
+    for name, (fname, want, fa, fb, lift, head_deg) in FOREIGN.items():
+        if ONLY and name not in ONLY:
+            if prev.get(name):
+                index['clips'][name] = prev[name]
+            continue
+        act = load_foreign_action(fname, want)
+        if not act:
+            if prev.get(name):
+                index['clips'][name] = prev[name]
+            continue
+        arm = arm_of()
+        bind_action(arm, act)
+        if KNEEL_FIX != [0.0, 0.0]:        # --kneel overrides, for sweeping
+            lift, head_deg = KNEEL_FIX
+        index['clips'][name] = render_clip(
+            name, act, sc, pose_fn=foot_follow(arm, lift, head_deg),
+            span=(fa, fb))
+
+    # The hand-posed prone is kept, and is no longer reached: `prone` is in
+    # FOREIGN above. Nine attempts are recorded on _prone_pose and in
+    # Sprite3D._sel; the code stays as the record of what was tried.
+    if POSED_PRONE and (not ONLY or 'prone' in ONLY):
         arm = arm_of()
         frozen = prone_bind(arm, sc, clips.get('aim') or clips.get('idle'))
         index['clips']['prone'] = render_clip(

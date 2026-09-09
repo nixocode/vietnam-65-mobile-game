@@ -175,96 +175,31 @@ const Sprite3D = {
       const p = Math.min(1, Math.max(0, (o.deadT || 0) - (o.dieLag || 0)) / dur);
       return [c, Math.min(f.length - 1, Math.floor(p * (f.length - 1) + 0.0001))];
     }
-    /* KNEELING — and it is `dive` frame 0, not a posed clip.
+    /* KNEEL AND PRONE ARE REAL CLIPS NOW.
      *
-     * A kneel WAS synthesised in Blender, and it was bad: the rear shin came
-     * out pointing back and UP with the foot in the air, the forward leg folded
-     * rather than planted, and widening the leg angles only splayed the man
-     * into the splits. Reported, accurately, as not looking coordinated.
+     * Everything above this line in the history of this file was an attempt to
+     * fake them. `kneel` and `prone` both resolved to frame 0 of `dive` and
+     * differed only by `proneDrop` in the draw — the same man, drawn lower. One
+     * of them was frame 1 for a long while, which is a man mid-somersault, and
+     * that was the barrel-rolling reported in firefights.
      *
-     * The pose already existed. `dive` is the donor's Roll, and its frame 0 is
-     * the crouch that precedes the roll: rear knee down with the shin flat
-     * along the ground, forward foot planted under a vertical shin, torso
-     * upright, head up. That is a firing kneel, and it is real mocap, so the
-     * weapon is gripped because it was RENDERED gripped.
+     * Both are now rendered: retargeted from the `Duck` action in weapons.glb,
+     * a seventh donor rig holding a different set of fourteen animations that
+     * had never been opened. See FOREIGN in tools/render_model_sprites.py.
      *
-     * This is the second time looking through existing clips has beaten posing
-     * one — prone is `dive` frame 1 for the same reason. And the two together
-     * are coherent: frame 0 kneeling, frame 1 prone, so the stance transition
-     * that runs 0 -> 1 IS the man going from one to the other.
-     *
-     * The synthesised `kneel` clip is gone from the atlas entirely, which also
-     * hands back 6 frames x 12 units of memory. */
-    if (o.pose === 'kneel' && (o.transT || 0) <= 0) {
-      const c = pick('dive', 'aim', 'idle');
-      if (c === 'dive' && C[c].length) return [c, 0];
-      if (c) {
-        const n = C[c].length;
-        const t = (o.time || 0) * 0.55 + (o.gaitOff || 0);
+     * They are held poses with a slow breath, not cycles, so they play at a
+     * crawl. The `dive` fallback stays for an atlas rendered before this. */
+    if ((o.pose === 'kneel' || o.pose === 'prone') && (o.transT || 0) <= 0) {
+      const want = o.pose;
+      if (C[want] && C[want].length) {
+        const n = C[want].length;
+        const t = (o.time || 0) * 0.22 + (o.gaitOff || 0);
         const q = ((t % 1) + 1) % 1 * n;
-        return [c, Math.floor(q) % n, q - Math.floor(q)];
+        return [want, Math.floor(q) % n, q - Math.floor(q)];
       }
-    }
-    if (o.pose === 'prone' && (o.transT || 0) <= 0) {
-      /* DOWN BEHIND THE WEAPON — and it is a frame of `dive`, not a pose built
-       * for the job.
-       *
-       * The rendered `prone` clip has never worked. It is synthesised by
-       * pitching the standing figure about the pelvis, and after seven attempts
-       * the failures are understood but not fixed:
-       *
-       *   - The pitch was about the WRONG AXIS. `pose_bone.matrix` is in
-       *     ARMATURE space, where this rig is Y-up, so the X rotation the code
-       *     used swung the body through the camera's depth axis. That is why
-       *     the head vanished — it was not hidden, it was rotated to where an
-       *     orthographic side camera projects it onto the pelvis — and why the
-       *     barrel pointed at the dirt. Rotating about Z instead lays the man
-       *     out in the view plane and the rifle comes out LEVEL.
-       *   - Counter-rotating `Chest` to lift the torso detaches the rifle,
-       *     every time. Chest is an ancestor of Wrist.R, and the weapon's
-       *     Child-Of inverse was captured at the standing pose. Bones that are
-       *     NOT ancestors of the wrist — Head, UpperLeg, LowerLeg — are safe.
-       *   - With the axis fixed and the chest left alone the grip survives and
-       *     the weapon is level, but the body still reads as a man sitting up
-       *     rather than lying down, and no combination of leg and head angles
-       *     tried has fixed that.
-       *
-       * So: use `dive` frame 1, which is real mocap of a man going to ground —
-       * pitched forward and low, legs trailing, rifle held level and forward,
-       * head up. The weapon is gripped because it was RENDERED gripped rather
-       * than posed into place afterwards, and it costs nothing: the clip is
-       * already in the atlas for the stance transition.
-       *
-       * This replaces an earlier workaround that used the `aim` pose dropped
-       * toward the ground — a STANDING man moved down the screen. This one is
-       * actually a low posture. `prone` itself stays out of the atlas entirely
-       * (see SKIP in tools/pack_sprites3d.py). */
-      /* FRAME 0, NOT FRAME 1 — and the note above is wrong about frame 1.
-       *
-       * It claims frame 1 is "a man going to ground, pitched forward and low,
-       * rifle level, head up". Rendered and looked at, it is not: the man is
-       * doubled over head-DOWN with his legs in the air, already into the
-       * donor's barrel roll. That is the somersault the owner has been
-       * reporting in firefights, and it was never a transition bug — it is the
-       * held pose itself.
-       *
-       * Every candidate in the atlas was checked before settling: dive 2-8 are
-       * the rest of the roll, death 5-11 put the man on his BACK with the
-       * weapon across him, and the donor's twenty-four mocap clips contain no
-       * crouch, kneel or prone at all — the three hand-posed attempts on disk
-       * (prone, kneel, crouch) all break the legs, because this rig has no IK
-       * and posing the legs by bone rotation splays them.
-       *
-       * So prone holds frame 0, the crouch, and earns its lower silhouette from
-       * `proneDrop` in the draw instead. It is not a true prone. It is a man
-       * hunkered lower than a kneel, which is a smaller lie than a cartwheel,
-       * and it costs nothing to ship today. A real prone needs a clip this
-       * donor does not have. */
       const c = pick('dive', 'aim', 'idle');
       if (c === 'dive' && C[c].length) return [c, 0];
       if (c) {
-        // fallback: the old aim-based hold, still with slow breathing so a
-        // frozen frame does not read as a bug
         const n = C[c].length;
         const t = (o.time || 0) * 0.5 + (o.gaitOff || 0);
         return [c, Math.floor(((t % 1) + 1) % 1 * n) % n];
