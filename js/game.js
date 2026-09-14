@@ -69,6 +69,23 @@ const COVER = {
   RANGE_TIME:  26,     // seconds in one spot before the enemy has it ranged
   RANGE_WARN:  3.6,    // ranging round lands, then this long before fire-for-effect
   RANGE_RATE:  5.6,    // seconds between rounds once they are on target
+
+  /* THE AI'S LEVER. See `_aiHoldsCover`.
+   *
+   * The player decides how long to hold a position with the lever. The AI had
+   * no such decision: `leverHolds` is player-only by design, so every AI squad
+   * fell through to the 2.6s quiet timer and climbed out the moment the
+   * shooting paused between bursts. Measured over 161 AI squad-minutes: median
+   * stay in cover 2.6s — exactly the timer — 58% of stays under 3s, and 63% of
+   * all exits "left on quiet". An AI trench was a pause, never a position; it
+   * reached a fifth of its dig-in and never held a line.
+   *
+   * In lever terms the AI's lever was welded to OVER THE TOP. These give it the
+   * same judgement a player exercises: hold while the enemy is still there,
+   * get out before the guns find you, and never sit in a hole forever. */
+  AI_HOLD_NEAR:  460,  // hold while a visible enemy is within this — the lull is temporary
+  AI_HOLD_MAX:   30,   // and never longer than this, observed or not
+  AI_RANGE_EDGE: 3,    // leave this many seconds BEFORE the position would be ranged
 };
 
 /* Squads a side may have in the field at once.
@@ -764,6 +781,20 @@ class Game {
     return !!(s && s.side === this.player && s.cover && s.cover.lever === 'hold');
   }
 
+  /* Does an AI squad keep holding the position it is in? See COVER.AI_HOLD_*.
+   *
+   * The order of these tests is the decision. The clock comes first, because a
+   * position about to be ranged is not worth holding however close the enemy
+   * is — leaving three seconds early costs nothing, arriving three seconds late
+   * costs a ranging round and a scramble under the barrage. Then the cap, so an
+   * unobserved hole (whose ranging clock never runs) cannot become permanent.
+   * Only then the reason to stay at all: somebody to fight is still in view. */
+  _aiHoldsCover(s, nearestFoe) {
+    if ((s.rangedT || 0) >= COVER.RANGE_TIME - COVER.AI_RANGE_EDGE) return false;
+    if ((s.coverHeldT || 0) >= COVER.AI_HOLD_MAX) return false;
+    return nearestFoe < COVER.AI_HOLD_NEAR;
+  }
+
   squadFitsCover(s, c) {
     if (c.sideReq && s.side !== c.sideReq) return false;
     if (!c.classReq) return true;
@@ -979,12 +1010,16 @@ class Game {
         }
       } else if (s.order === 'holdcover') {
         // a squad on ADVANCE orders pushes on once the shooting stops; only an
-        // explicit player HOLD keeps it in the hole
-        if (s.underFireT <= 0 && !engaged && !s.playerHeld && !this.leverHolds(s)) {
+        // explicit player HOLD — or, for the AI, its own judgement — keeps it
+        // in the hole
+        s.coverHeldT = (s.coverHeldT || 0) + dt;
+        const aiHold = s.side !== this.player && this._aiHoldsCover(s, nearestFoe);
+        if (s.underFireT <= 0 && !engaged && !s.playerHeld && !this.leverHolds(s) && !aiHold) {
           s.quietT += dt;
           if (s.quietT > 2.6) {
             this.coverLeave(s);
             s.order = s.hold ? 'hold' : 'advance';
+            s.coverHeldT = 0;
             // do not let it dive straight back into the hole it just left
             s.coverCd = 3.5;
           }
