@@ -1060,6 +1060,27 @@ class Game {
           this.smokeAt(s.lane, s.x + s.dir * 70) > 0.35;
         const mayMove = hostileFire === 0 || covering || s.inCover || screened;
 
+        /* THE AI POPS SMOKE WHEN THE BOUNDING RULE HAS IT PINNED.
+         *
+         * A squad under fire will not cross open ground unless a friendly is
+         * covering it — and when nothing is, it simply stands there. That was
+         * measured as a deadlock last week, and a timeout that made the squad
+         * rush anyway was written, measured and thrown out: it changed nothing.
+         *
+         * The game already has the answer and the AI had never once used it.
+         * Smoke sets `screened`, which is one of the four things that lets a
+         * bound squad move, and it blocks the enemy's line of sight at the same
+         * time — it is the designed tool for exactly this moment. Counted over
+         * 24 AI-minutes: artillery called 60 times, smoke 0.
+         *
+         * A beat of hesitation first, so a squad that is only briefly held — a
+         * burst passing, a friendly about to open up — does not waste a 22s
+         * cooldown on a problem that was solving itself. */
+        if (s.side !== this.player && !mayMove && !s.pinned && !engaged) {
+          s.boundT = (s.boundT || 0) + dt;
+          if (s.boundT > SMOKE_HESITATE && this._squadSmoke(s)) s.boundT = 0;
+        } else s.boundT = 0;
+
         if (!s.pinned && !engaged && this._squadPathClear(s) && mayMove) {
           /* THE PACING QUESTION, ANSWERED AND THEN LEFT ALONE.
            *

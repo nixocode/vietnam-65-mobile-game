@@ -401,6 +401,8 @@ const M79 = { range: 260, blast: 52, dmg: 28, flight: 1.05, cd: 13 };
 const SMOKE = {
   range: 140, radius: 88, life: 13, build: 1.1, cd: 22, flight: 0.8,
 };
+// how long an AI squad stands held by the bounding rule before it pops smoke
+const SMOKE_HESITATE = 1.4;
 
 /* Order matters: the HUD groups cards by `role` and lays the groups out in the
  * order they first appear here, so a roster must keep its roles contiguous.
