@@ -189,7 +189,7 @@ const App = {
     el('btn-brief-start').onclick = () => {
       Sound.click();
       const m = CAMPAIGN[this.mission];
-      this.startGame({ mapId: m.map, playerSide: m.side, difficulty: m.diff });
+      this.startGame({ mapId: m.map, playerSide: m.side, difficulty: m.diff, guide: m.guide });
     };
 
     el('btn-pause').onclick = () => this.togglePause();
@@ -200,14 +200,14 @@ const App = {
     el('btn-restart').onclick = () => {
       Sound.click();
       const g = this.game;
-      this.startGame({ mapId: g.map.id, playerSide: g.player, difficulty: this._diffId(g) });
+      this.startGame({ mapId: g.map.id, playerSide: g.player, difficulty: this._diffId(g), guide: g.guideId });
     };
     el('btn-abort').onclick = () => { Sound.click(); this.quitToMenu(); };
 
     el('btn-result-replay').onclick = () => {
       Sound.click();
       const g = this.game;
-      this.startGame({ mapId: g.map.id, playerSide: g.player, difficulty: this._diffId(g) });
+      this.startGame({ mapId: g.map.id, playerSide: g.player, difficulty: this._diffId(g), guide: g.guideId });
     };
     el('btn-result-menu').onclick = () => { Sound.click(); this.quitToMenu(); };
     el('btn-next-mission').onclick = () => {

@@ -663,10 +663,10 @@ const MAP_ORDER = ['iadrang', 'cuchi', 'mekong', 'khesanh', 'hill937'];
 /* ---------------- Campaign ---------------- */
 const CAMPAIGN = [
   {
-    map: 'iadrang', side: 'us', diff: 'recruit', title: 'LZ X-RAY',
+    map: 'iadrang', side: 'us', diff: 'recruit', title: 'LZ X-RAY', guide: 'lzxray',
     meta: 'IA DRANG VALLEY · 14 NOVEMBER 1965 · PLAYING: US 1st CAVALRY',
     brief: 'The 1st Cavalry Division (Airmobile) has put four hundred men into a clearing at the foot of the Chu Pong massif — directly beneath two NVA regiments. This is the first battle where American troops arrive entirely by helicopter, and the first test of a simple question: can firepower and mobility beat numbers and terrain?\n\nHold the line. Use artillery early and often — it is the only reason a battalion survives against a division.',
-    objectives: ['◆ Break enemy morale', '◆ Hold the lane flags to bleed their will to fight', '◆ Try each call-in: Fire Mission [Q], Napalm [W], Dustoff [E]'],
+    objectives: ['◆ Break enemy morale', '◆ Follow your field orders at the top of the screen', '◆ Hold the lane flags to bleed their will to fight', '◆ Try each call-in: Fire Mission [Q], Napalm [W], Dustoff [E]'],
   },
   {
     map: 'cuchi', side: 'vc', diff: 'veteran', title: 'THE EARTH FIGHTS',
@@ -693,6 +693,32 @@ const CAMPAIGN = [
     objectives: ['◆ Capture BOTH lane flags — or break enemy morale', '◆ Enemy fires downhill: expect losses', '◆ If the timer expires, the assault is called off'],
   },
 ];
+
+/* FIELD ORDERS — a guided first operation.
+ *
+ * v2 and v3 were built around trenches, the lever, the dig-in and ranging clock
+ * and the M79, and no campaign brief or objective mentioned any of them. The
+ * tutor explains each system the first time it happens to come up; nothing ever
+ * put the player in front of them in the order they build on each other.
+ *
+ * These are that order, shown in the HUD objective line one at a time. Each
+ * step completes on a MARK the game raises at the moment the thing actually
+ * happens (see Game.mark), so a step is done when the player has done it — not
+ * when a timer says so, and not by reading the screen. Marks can arrive out of
+ * order and are remembered, so a player who fires the M79 early is not asked to
+ * do it again later.
+ *
+ * The orders are guidance, never a gate. The operation is won or lost on morale
+ * exactly as before; a player who ignores them loses nothing but the lesson. */
+const GUIDES = {
+  lzxray: [
+    { mark: 'deployed', text: 'DEPLOY A SQUAD INTO A LANE' },
+    { mark: 'trench',   text: 'TAKE A TRENCH AT MID-FIELD' },
+    { mark: 'dugin',    text: 'HOLD THE TRENCH UNTIL DUG IN' },
+    { mark: 'movedout', text: 'HOLD UNTIL RANGED — THEN THROW THE LEVER' },
+    { mark: 'm79',      text: 'FIRE A WEAPONS TEAM M79 AT THE ENEMY' },
+  ],
+};
 
 /* Rolling micro-relief laid over the authored profile.
  *

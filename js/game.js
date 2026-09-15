@@ -193,6 +193,11 @@ class Game {
     this.aiSide = this.enemy;
     this.diff = DIFFS[cfg.difficulty || 'veteran'];
     this.mode = this.map.mode;
+    // field orders for a guided operation — see GUIDES in data.js
+    this.guideId = cfg.guide || null;
+    this.guide = (this.guideId && typeof GUIDES !== 'undefined') ? GUIDES[this.guideId] || null : null;
+    this.guideStep = 0;
+    this.marks = new Set();
 
     this.fx = new FXManager(this.map);
     this.units = [];
@@ -720,6 +725,7 @@ class Game {
     c.occ.push(s);
     s.cover = c; s.inCover = true;
     if (s.side === this.player) {
+      if (c.dug) this.mark('trench');
       if (typeof Tutor !== 'undefined') Tutor.teach('trench');
       if (c.occ.length > 1) if (typeof Tutor !== 'undefined') Tutor.teach('crowd');
     }
@@ -728,7 +734,32 @@ class Game {
     return true;
   }
 
+  /* A squad got out of a position the enemy had ranged.
+   *
+   * This fired from exactly one place — `_updateCoverClock`, on the frame a
+   * squad drifted while still registered in cover — and every deliberate exit
+   * goes through `coverLeave` instead, which wipes `rangedIn` and `cover` before
+   * that branch can look at them. So the message never appeared: over ten
+   * matches, 46 positions ranged, 44 squads left one under that fire, and
+   * FIRE BROKEN was shown zero times. The feedback for the lever's whole point
+   * — getting out before the shells walk in — was dead code.
+   *
+   * Both exit paths call this now, and it is the moment the guided operation
+   * waits for as well. */
+  _fireBroken(s) {
+    if (!s.rangedIn || !s.cover) return;
+    /* Somebody has to have got out. A squad wiped out by the barrage is removed
+     * through coverLeave too, and without this it was reported as FIRE BROKEN
+     * — the opposite of what happened — and credited the guided operation with
+     * "moved out" for a player who never threw the lever: all 19 such credits
+     * in a four-run check came from dead squads being cleared away. */
+    if (!this.squadAlive(s).length) return;
+    this.emit(`FIRE BROKEN — LANE ${s.lane + 1}`, s.side);
+    if (s.side === this.player) this.mark('movedout');
+  }
+
   coverLeave(s) {
+    this._fireBroken(s);        // before the ranging state is wiped below
     const c = s.cover;
     if (c) {
       const i = c.occ.indexOf(s);
@@ -1412,7 +1443,7 @@ class Game {
 
   _updateCoverClock(s, dt, moved) {
     if (!s.inCover || moved) {
-      if (s.rangedIn && s.cover) this.emit(`FIRE BROKEN — LANE ${s.lane + 1}`, s.side);
+      this._fireBroken(s);
       s.entrenchT = 0; s.rangedT = 0; s.rangedIn = false;
       s.rangedShots = 0; s.rangedFuse = 0;
       return;
@@ -1430,6 +1461,7 @@ class Game {
       if (was < COVER.DIG_TIME && s.entrenchT >= COVER.DIG_TIME &&
           s.side === this.player) {
         this.fx.floater(s.x, groundY(this.map, s.lane, s.x) - 34, 'DUG IN', '#b5c98f');
+        this.mark('dugin');
         if (typeof Tutor !== 'undefined') Tutor.teach('dugin');
         if (Camera.sees(s.x, 60)) Sound.shovel(s.x);
       }
@@ -1450,7 +1482,10 @@ class Game {
       this.fx.addDecal(s.lane, x, 'crater', 10);
       this.fx.floater(c.x, groundY(this.map, s.lane, c.x) - 40, 'RANGING ROUNDS', '#e08767');
       this.emit(`POSITION RANGED — LANE ${s.lane + 1}`, s.side);
-      if (s.side === this.player) if (typeof Tutor !== 'undefined') Tutor.teach('ranged');
+      if (s.side === this.player) {
+        this.mark('ranged');
+        if (typeof Tutor !== 'undefined') Tutor.teach('ranged');
+      }
       this._areaDamage(s.lane, x, 40, 8,
         { side: this.foeOf(s.side) }, this.foeOf(s.side));
       return;
@@ -1693,6 +1728,7 @@ class Game {
     const m = alive.find(q => q.key === 'grenadier') || alive[0];
     m.nadeT = 0.55;                       // he shoulders it briefly
     Sound.blooper(m.x);
+    if (s.side === this.player) this.mark('m79');
     this.strikes.push({
       type: 'm79', side: s.side, lane: s.lane, x: target, age: 0,
       dur: M79.flight + 0.8,
@@ -1840,6 +1876,7 @@ class Game {
       squad.men.forEach((m, i) => { m.emergeT = 0.5 + i * 0.22; });
       this.fx.smokePuff(x, squad.men[0].y);
     }
+    if (side === this.player) this.mark('deployed');
     return true;
   }
 
@@ -3556,7 +3593,27 @@ class Game {
     return null;
   }
 
+  /* Something the player did, worth remembering once. Drives GUIDES.
+   *
+   * Raised at the exact moment each thing happens — beside the tutor hooks,
+   * which already sit on those moments — rather than inferred later by polling
+   * state, so a step cannot be completed by something that merely looked like
+   * it for a frame. */
+  mark(name) {
+    if (this.marks.has(name)) return;
+    this.marks.add(name);
+    const g = this.guide;
+    if (!g) return;
+    while (this.guideStep < g.length && this.marks.has(g[this.guideStep].mark)) {
+      this.emit(`ORDERS COMPLETE — ${g[this.guideStep].text}`, this.player);
+      this.guideStep++;
+    }
+  }
+
   objectiveText() {
+    if (this.guide && this.guideStep < this.guide.length) {
+      return `ORDERS ${this.guideStep + 1}/${this.guide.length} — ${this.guide[this.guideStep].text}`;
+    }
     if (this.mode === 'siege') {
       const left = Math.max(0, this.timeLimit - this.time);
       const m = Math.floor(left / 60), s = Math.floor(left % 60);
