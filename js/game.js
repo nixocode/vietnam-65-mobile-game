@@ -1994,8 +1994,29 @@ class Game {
 
     // flag pressure on morale
     const net = this.flags.filter(f => f.owner === 'us').length - this.flags.filter(f => f.owner === 'vc').length;
-    if (net > 0) this.morale.vc -= net * FLAG_DRAIN * dt;
-    else if (net < 0) this.morale.us -= -net * FLAG_DRAIN * dt;
+    /* ON A SIEGE OR AN ASSAULT, ONLY THE DEFENDER BLEEDS FOR FLAGS.
+     *
+     * The bleed was written for standard maps, where every flag starts neutral
+     * and holding fewer than the enemy is a position you fell into. Siege and
+     * assault maps pre-own them: the defender starts with BOTH, so the attacker
+     * was in deficit from the first frame — 2 x FLAG_DRAIN, 0.44 morale a
+     * second, before a single man could reach a flag. Hill 937's first shot
+     * lands at ~51s; by then the attacker had lost ~22 morale walking uphill.
+     *
+     * Measured over four runs each, both attack missions were lost 4/4 — Hill
+     * 937 in ~95s and Khe Sanh in ~106s, with ~45% of the attacker's morale
+     * going to this bleed. And that exposed the real problem: 0.44/s empties a
+     * full bar in 227s, so the 780s assault timer and the 640s siege timer —
+     * the pressure both briefings actually promise the player ("nine minutes of
+     * darkness", "if the timer expires, the assault is called off") — could
+     * never once be what decided the mission. The designed rule was dead code.
+     *
+     * The timer is the attacker's pressure in these modes. The flags are the
+     * defender's: lose one and you bleed for it. Not yet having taken ground you
+     * came to take is the starting condition, not a failure. */
+    const defender = (this.mode === 'siege' || this.mode === 'assault') ? this.map.preOwner : null;
+    if (net > 0 && (!defender || defender === 'vc')) this.morale.vc -= net * FLAG_DRAIN * dt;
+    else if (net < 0 && (!defender || defender === 'us')) this.morale.us -= -net * FLAG_DRAIN * dt;
 
     this._checkEnd();
   }

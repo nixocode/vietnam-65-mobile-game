@@ -690,7 +690,7 @@ const CAMPAIGN = [
     map: 'hill937', side: 'us', diff: 'veteran', title: 'HAMBURGER HILL',
     meta: 'HILL 937, A SHAU VALLEY · MAY 1969 · PLAYING: US 101st AIRBORNE',
     brief: 'Ten days, eleven assaults, monsoon rain, and a ridge the men have started calling Hamburger Hill. The 29th NVA Regiment is dug into bunkers on the crest, and orders are to take it — a hill that everyone suspects will be abandoned a month after it falls.\n\nThis is the war at its most grinding. The enemy owns the high ground and every approach is registered. Climb.',
-    objectives: ['◆ Capture ALL THREE lane flags — or break enemy morale', '◆ Enemy fires downhill: expect losses', '◆ If the timer expires, the assault is called off'],
+    objectives: ['◆ Capture BOTH lane flags — or break enemy morale', '◆ Enemy fires downhill: expect losses', '◆ If the timer expires, the assault is called off'],
   },
 ];
 
