@@ -118,8 +118,8 @@ FIG_H, ORTHO, CAM_Z = 1.8, 1.8 * 1.5, 1.8 * 0.52
 
 # clip playback order is fixed so a frame index means the same thing everywhere
 CLIP_ORDER = ['idle', 'idle2', 'walk', 'run', 'runfire', 'aim', 'fire',
-              'hit', 'hit2', 'death', 'prone', 'kneel', 'throw', 'dive',
-              'melee', 'fallback', 'rest']
+              'hit', 'hit2', 'death', 'prone', 'kneel', 'settle', 'throw',
+              'dive', 'melee', 'fallback', 'rest']
 
 
 def pack(unit):

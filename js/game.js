@@ -1323,6 +1323,8 @@ class Game {
              * does the work, which is what it should have been doing anyway. */
             m.transA = (prev === 'prone') ? 1 : 0;
             m.transB = (want === 'prone') ? 1 : 0;
+            // the stances themselves, for the `settle` clip — see Sprite3D._sel
+            m.transFrom = prev; m.transTo = want;
             m.transDir = m.transB >= m.transA ? 1 : -1;   // kept for the vector rig
             m.transT = STANCE_TRANS;
           }

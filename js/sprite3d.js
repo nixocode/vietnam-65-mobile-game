@@ -213,6 +213,40 @@ const Sprite3D = {
         return [c, Math.min(C[c].length - 1, Math.floor(p * C[c].length))];
       }
     }
+    /* GOING TO GROUND IS THE DONOR LOWERING ITSELF, NOT TWO FRAMES OF A ROLL.
+     *
+     * The branch below borrows frames 0 and 1 of `dive`, the donor's Roll, and
+     * its comment calls frame 1 "the man low behind his weapon". Rendered and
+     * looked at, frame 0 is a lunge with the rifle held VERTICAL and frame 1 is
+     * a man launched forward off the ground. So every drop to a crouch went
+     * rifle level -> rifle vertical -> airborne -> snap into the crouch, and
+     * every rise played that backwards: a man diving backwards through the air
+     * to stand up. It has been this way since the kneel and prone became real
+     * clips, because nothing between them and standing ever did.
+     *
+     * `settle` is the first 30% of the same `Duck` action the kneel is cut from
+     * — the donor actually bending its knees and bringing the weapon up — with
+     * its correction ramped from nothing to the kneel's, so its last frame IS
+     * kneel frame 0. Forward to go down, backwards to get up; kneel<->prone is
+     * two crouches and needs no bridge.
+     *
+     * Read off `ref` rather than off `o`, because the muzzle-flash path builds
+     * its own object without transA/transB and so already chose a different
+     * frame from the draw path mid-transition. Both pass `ref`. */
+    if ((o.transT || 0) > 0 && C.settle && C.settle.length) {
+      const u = o.ref || o;
+      const from = u.transFrom, to = u.transTo;
+      if (from != null && to != null) {
+        const low = (st) => st === 'kneel' || st === 'prone';
+        const p = 1 - Math.min(1, (o.transT || 0) / STANCE_TRANS);
+        const n = C.settle.length;
+        // p*(n-1): the last frame is only reached with nothing left to blend,
+        // so a one-shot clip can never wrap back to its standing frame
+        if (!low(from) && low(to)) return ['settle', Math.round(p * (n - 1))];
+        if (low(from) && !low(to)) return ['settle', Math.round((1 - p) * (n - 1))];
+        if (C[to] && C[to].length) return [to, 0];
+      }
+    }
     if ((o.transT || 0) > 0 && C.dive && C.dive.length) {
       /* Going to ground is a dive rather than a pop between standing and prone.
        *

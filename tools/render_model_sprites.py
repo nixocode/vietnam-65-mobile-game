@@ -127,7 +127,9 @@ CLIP_FRAMES = {'idle': 6, 'aim': 6, 'fire': 7, 'run': 24,
                # all sitting there unmined.
                'fallback': 14, 'rest': 6,
                # Retargeted from weapons.glb — see FOREIGN below.
-               'kneel': 5}
+               'kneel': 5,
+               # the transition INTO the crouch — see FOREIGN_RAMP
+               'settle': 6}
 LOOPING = {'idle', 'idle2', 'run', 'runfire', 'walk', 'prone', 'fallback',
            'rest', 'kneel'}
 
@@ -170,7 +172,22 @@ FOREIGN = {
     # `kneel` were both frame 0 of `dive` and differed only by the renderer
     # drawing one of them lower.
     'prone': ('weapons.glb', 'Duck', 0.44, 0.56, -44.0, 40.0),
+    # SETTLE is the first 30% of the same action — the donor actually lowering
+    # itself from standing into the crouch — which `kneel` crops away. It exists
+    # because the stance transition had nothing better than two frames of the
+    # donor's ROLL: a lunge with the rifle held vertical, then a man launched
+    # forward off the ground, then a snap into the crouch. Played forward it is
+    # going to ground; played backwards it is getting up. Ends at 0.30 exactly
+    # where `kneel` begins, so the handoff is the same frame.
+    'settle': ('weapons.glb', 'Duck', 0.0, 0.30, -26.0, 26.0),
 }
+
+# Clips whose fixup RAMPS from nothing to its full value across the clip rather
+# than holding it. `settle` starts upright, where the dodge has not yet tucked
+# the head and there is nothing to correct, and ends on the kneel's first frame,
+# which carries the kneel's full correction. A constant fix would lift the head
+# of a man still standing; no fix would pop at the handoff.
+FOREIGN_RAMP = {'settle'}
 
 # Bones that must be made to follow a parent they do not actually have.
 #
@@ -180,6 +197,40 @@ FOREIGN = {
 # bends the knee while the shoe stays where it was, and the mesh stretches
 # between them into a long smear. Capturing each foot's rest offset relative to
 # its shin and re-applying it per frame is that missing parenting.
+# REST ORIENTATIONS OF THE RIG A FOREIGN CLIP CAME FROM, keyed by action name.
+#
+# Retargeting "by bone name" copies each bone's LOCAL rotation, and a local
+# rotation only means the same thing on two rigs if their bones rest pointing
+# the same way. Measured against weapons.glb, where `Duck` comes from: `soldier`
+# is within 6 degrees on every bone, which is why the rifleman and grenadier came
+# out clean. worker, casual, farmer, swat and hoodie rest their THIGHS 90 degrees
+# round from it, and adventurer is 91 on the thigh and 180 on the body, torso and
+# shin. On those eleven units the same numbers swung the legs out behind the man.
+#
+# So each driven bone's rotation is carried relative to its OWN rig's rest: with
+# Rs the source bone's rest and Rt the target's, C = Rt^-1 * Rs and the target
+# gets C * q * C^-1 — the same turn in armature space, whichever way the bone
+# happens to lie. Animated locations take C too; on adventurer the uncorrected
+# pelvis drop would have pushed the hips UP.
+FOREIGN_REST = {}
+FOREIGN_BONES = {}
+FOREIGN_LOC = {}
+FOREIGN_SIDE = {}
+# EVERY DRIVEN BONE, because it is a CHAIN — except on a mirrored skeleton.
+#
+# adventurer (m60, recon) is left-right swapped against every other donor and the
+# source: its bone named `.R` sits on the other physical side, while its mesh
+# faces the same way. Seven transforms were rendered and looked at for it —
+# uncorrected, fully corrected, legs only, legs reflected, reflected with a side
+# swap, arms left raw, and a 180-degree turn — and none got the whole body right:
+# every one fixed a region and broke another. What the renders DID establish is
+# which treatment is right for which region, and that is what this uses:
+#   - pelvis and legs take the rest-relative correction (the only treatment that
+#     ever planted adventurer's feet, and the pelvis must go with its legs), and
+#   - torso, head and arms stay uncorrected (the only treatment that ever kept
+#     that torso upright and the rifle level).
+# This is an empirical split for one rig, not a derivation, and it says so.
+
 FOLLOW = (('Foot.L', 'LowerLeg.L'), ('Foot.R', 'LowerLeg.R'),
           ('PT.L', 'LowerLeg.L'), ('PT.R', 'LowerLeg.R'))
 
@@ -1199,7 +1250,9 @@ def render_clip(name, action, sc, pose_fn=None, span=None):
         sc.frame_set(int(round(f)))
         bpy.context.view_layer.update()
         if pose_fn:
-            pose_fn(i / max(1, n))
+            # the same progress the frame was placed at, so a ramp lands on 1.0
+            # at the last frame of a one-shot clip rather than at (n-1)/n
+            pose_fn(i / div)
         fn = '%s_%02d' % (name, i)
         pts.append(muzzle_px())
         if not NORENDER:
@@ -1223,6 +1276,31 @@ def _all_fcurves(act):
     return out
 
 
+LEG_CHAIN = {'Body', 'UpperLeg.L', 'UpperLeg.R', 'LowerLeg.L', 'LowerLeg.R',
+             'UpperArm.L', 'UpperArm.R', 'LowerArm.L', 'LowerArm.R'}
+
+
+def _swap_side(name):
+    if name.endswith('.L'):
+        return name[:-2] + '.R'
+    if name.endswith('.R'):
+        return name[:-2] + '.L'
+    return name
+
+
+def _lateral_sign(arm, pair='UpperArm'):
+    """Which side of the rig its RIGHT limb is on, as +1 or -1 along armature X.
+
+    Measured on bone heads, which are positions, so it answers "which side is
+    this limb on" independently of how each bone happens to be rolled.
+    adventurer's ARMS come out opposite to every other donor and to the source.
+    """
+    r = arm.data.bones.get(pair + '.R'); l = arm.data.bones.get(pair + '.L')
+    if not r or not l:
+        return 1
+    return 1 if (r.head_local.x - l.head_local.x) >= 0 else -1
+
+
 def load_foreign_action(fname, want):
     """Import another .glb purely for one of its actions, then bin its objects.
 
@@ -1244,6 +1322,12 @@ def load_foreign_action(fname, want):
     act = next((a for a in fresh if want.lower() in a.name.lower()), None)
     if act:
         act.use_fake_user = True
+        src_arm = next((o for o in bpy.data.objects
+                        if o.name not in keep and o.type == 'ARMATURE'), None)
+        if src_arm:
+            FOREIGN_REST[act.name] = {b.name: b.matrix_local.to_quaternion()
+                                      for b in src_arm.data.bones}
+            FOREIGN_SIDE[act.name] = _lateral_sign(src_arm, 'UpperLeg')
     for o in [o for o in bpy.data.objects if o.name not in keep]:
         bpy.data.objects.remove(o, do_unlink=True)
     if not act:
@@ -1251,6 +1335,10 @@ def load_foreign_action(fname, want):
         return None
     bones = {fc.data_path.split('"')[1] for fc in _all_fcurves(act)
              if fc.data_path.startswith('pose.bones["')}
+    FOREIGN_BONES[act.name] = bones
+    FOREIGN_LOC[act.name] = {fc.data_path.split('"')[1] for fc in _all_fcurves(act)
+                             if fc.data_path.startswith('pose.bones["')
+                             and fc.data_path.endswith('.location')}
     host = arm_of()
     missing = sorted(b for b in bones if b not in host.pose.bones)
     print('FOREIGN %s/%s drives %d bones, %d missing %s'
@@ -1278,18 +1366,38 @@ def bind_action(arm, act):
     bpy.context.view_layer.update()
 
 
-def foot_follow(arm, lift=0.0, head_deg=0.0):
+def foot_follow(arm, lift=0.0, head_deg=0.0, ramp=False):
     """Per-frame pose_fn: bake, fix up, then reattach the feet. See FOLLOW."""
     had = arm.animation_data.action if arm.animation_data else None
     slot = getattr(arm.animation_data, 'action_slot', None) if arm.animation_data else None
     if arm.animation_data:
         arm.animation_data.action = None
     bpy.context.view_layer.update()
+    # MEASURE AT THE BIND POSE, NOT AT WHATEVER POSE WAS LEFT BEHIND.
+    #
+    # Detaching an action does not reset a pose: every bone keeps the
+    # matrix_basis it was last evaluated to. So this used to measure each foot's
+    # offset from its shin with the shin ALREADY bent by the foreign action at
+    # whatever frame the scene happened to be on, against a foot left over from
+    # the donor's own aim pose — and then faithfully preserved that wrong offset
+    # on every frame. Rendered and looked at across all thirteen units: only the
+    # two built on `soldier` came out clean. The other eleven shipped a kneel and
+    # prone with legs stretched into ribbons, the shoe left far behind the shin.
+    # Identity matrix_basis on every bone IS the bind pose, where the foot sits
+    # under the shin by construction — which is the parenting the rig lacks.
+    saved = {b.name: b.matrix_basis.copy() for b in arm.pose.bones}
+    from mathutils import Matrix
+    for b in arm.pose.bones:
+        b.matrix_basis = Matrix.Identity(4)
+    bpy.context.view_layer.update()
     rel = {}
     for child, parent in FOLLOW:
         cb, pb = arm.pose.bones.get(child), arm.pose.bones.get(parent)
         if cb and pb:
             rel[child] = pb.matrix.inverted() @ cb.matrix
+    for b in arm.pose.bones:
+        b.matrix_basis = saved[b.name]
+    bpy.context.view_layer.update()
     if had:
         arm.animation_data.action = had
         if slot:
@@ -1333,6 +1441,38 @@ def foot_follow(arm, lift=0.0, head_deg=0.0):
             pb = arm.pose.bones.get(name)
             if pb:
                 pb.matrix_basis = mb
+        # carry each driven rotation relative to this rig's rest — FOREIGN_REST
+        src_rest = FOREIGN_REST.get(had.name) if had else None
+        if src_rest:
+            from mathutils import Matrix, Vector
+            mirrored = _lateral_sign(arm, 'UpperLeg') != FOREIGN_SIDE.get(had.name, -1)
+            if not getattr(foot_follow, '_told', None) == (UNIT, had.name):
+                foot_follow._told = (UNIT, had.name)
+                print('RETARGET', UNIT, 'mirrored=%s' % mirrored)
+            locs = FOREIGN_LOC.get(had.name, set())
+            driven = FOREIGN_BONES.get(had.name, ())
+            # read every source value BEFORE writing any: on a mirrored rig a
+            # bone takes its opposite number's motion, which may already have
+            # been rewritten if this were done in place
+            src_basis = {bn: baked[bn] for bn in driven if bn in baked}
+            for bn in driven:
+                if mirrored and bn not in LEG_CHAIN:
+                    continue
+                pb = arm.pose.bones.get(bn)
+                sbn = bn
+                if not pb or sbn not in src_rest or sbn not in src_basis:
+                    continue
+                rs = src_rest[sbn]
+                rt = arm.data.bones[bn].matrix_local.to_quaternion()
+                sloc, srot, ssca = src_basis[sbn].decompose()
+                d = rs @ srot @ rs.inverted()          # the turn, in armature space
+                rot_t = rt.inverted() @ d @ rt
+                if bn in locs:
+                    v = rs @ sloc                      # the move, in armature space
+                    loc_t = rt.inverted() @ v
+                else:
+                    loc_t = pb.matrix_basis.to_translation()
+                pb.matrix_basis = Matrix.LocRotScale(loc_t, rot_t, ssca)
         bpy.context.view_layer.update()
 
         # `Duck` is a dodge: the head is tucked down between the shoulders and
@@ -1340,10 +1480,11 @@ def foot_follow(arm, lift=0.0, head_deg=0.0):
         # and weapon together — it is an ancestor of Wrist.R, which is exactly
         # why it works, because the gun rides a Child-Of on the wrist and
         # follows the hand wherever the chest puts it.
+        k = min(1.0, max(0.0, _t)) if ramp else 1.0
         if lift:
-            _pitch(arm, 'Torso', lift, axis='Z')
+            _pitch(arm, 'Torso', lift * k, axis='Z')
         if head_deg:
-            _pitch(arm, 'Head', head_deg, axis='Z')
+            _pitch(arm, 'Head', head_deg * k, axis='Z')
         for child, parent in FOLLOW:
             cb, pb = arm.pose.bones.get(child), arm.pose.bones.get(parent)
             if cb and pb and child in rel:
@@ -1567,7 +1708,8 @@ def main():
         if KNEEL_FIX != [0.0, 0.0]:        # --kneel overrides, for sweeping
             lift, head_deg = KNEEL_FIX
         index['clips'][name] = render_clip(
-            name, act, sc, pose_fn=foot_follow(arm, lift, head_deg),
+            name, act, sc,
+            pose_fn=foot_follow(arm, lift, head_deg, ramp=name in FOREIGN_RAMP),
             span=(fa, fb))
 
     # The hand-posed prone is kept, and is no longer reached: `prone` is in

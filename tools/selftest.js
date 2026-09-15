@@ -214,7 +214,7 @@ window.SelfTest = {
 
     // ---- asset integrity, before any play
     const wantUnits = ['rifleman', 'arvn', 'm60', 'engineer', 'recon', 'sniper',
-      'guerrilla', 'nva', 'rpd', 'sapper', 'marksman', 'rpgman'];
+      'guerrilla', 'nva', 'rpd', 'sapper', 'marksman', 'rpgman', 'grenadier'];
     ok(typeof Sprite3D !== 'undefined' && Sprite3D.enabled, 'Sprite3D not enabled');
     for (const k of wantUnits) ok(Sprite3D.has(k), 'missing sprite atlas: ' + k);
 
@@ -227,8 +227,13 @@ window.SelfTest = {
      * requirement the game does not have.
      *
      * Add a clip here only once something selects it. */
+    /* `kneel`, `prone` and `settle` are selected now. The note above explains why
+     * prone was left out — a broken source clip routed to `aim` — and that stopped
+     * being true when all three were retargeted from weapons.glb's `Duck`. They
+     * are in the list because an atlas that silently lacks one falls back to the
+     * donor's roll, which is the barrel-roll this whole list exists to prevent. */
     const wantClips = ['idle', 'idle2', 'walk', 'run', 'runfire', 'aim', 'fire',
-      'hit', 'hit2', 'death', 'throw', 'dive'];
+      'hit', 'hit2', 'death', 'throw', 'dive', 'kneel', 'prone', 'settle'];
     for (const k of wantUnits) {
       if (!Sprite3D.has(k)) continue;
       const C = Sprite3D.units[k].meta.clips;
