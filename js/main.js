@@ -160,6 +160,15 @@ const App = {
      * reload it takes to get into fullscreen. */
     try {
       if (/[?&]perf=1\b/.test(location.search)) Renderer.showPerf = true;
+    /* ?seed=N — replay an exact match.
+     *
+     * The sim draws from its own seedable stream now (see Game's constructor),
+     * and every match already reports the seed it used. This is the other half
+     * of that: paste the seed back and the same battle happens again, which is
+     * the difference between "it went wrong somewhere in the third minute" and
+     * a bug someone else can reproduce. */
+    const sm = /[?&]seed=(\d+)/.exec(location.search);
+    if (sm) this.urlSeed = (+sm[1]) >>> 0;
     } catch (e) { /* location is always there; belt and braces */ }
     requestAnimationFrame(t => this._frame(t));
   },
@@ -338,6 +347,8 @@ const App = {
   startGame(cfg) {
     clearInterval(this._typeTimer);
     this.lastT = 0;                    // a new match starts its own clock
+    // ?seed=N replays one exact match — see the parse in init
+    if (this.urlSeed != null && cfg.seed == null) cfg = Object.assign({}, cfg, { seed: this.urlSeed });
     this.game = new Game(cfg);
     Renderer.buildStatic(this.game);
     Camera.reset(cfg.playerSide === 'us' ? 0 : WORLD_W);

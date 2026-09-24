@@ -235,7 +235,7 @@ class Game {
      * a browser frame would consume draws a headless run does not and the two
      * would diverge. */
     this.seed = (cfg.seed != null ? cfg.seed : Math.random() * 4294967296) >>> 0;
-    this._rng = seeded(this.seed);
+    this._rng = seededSim(this.seed);   // NOT `seeded` — see seededSim in data.js
 
     this.map = normaliseMap(MAPS[cfg.mapId]);
     this.player = cfg.playerSide;

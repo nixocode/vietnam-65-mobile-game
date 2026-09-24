@@ -187,6 +187,14 @@ if (require.main === module) {
     : Object.keys(api.MAPS).map(m => ({ map: m, side: 'us', diff: 'veteran', title: m }));
   if (only) missions = missions.filter(m => m.map === only);
 
+  /* SEEDS ARE CONSECUTIVE, AND THAT IS ONLY SAFE BECAUSE OF seededSim.
+   *
+   * Under the old LCG the first draw of adjacent seeds correlated at 0.998, so
+   * a block of twelve consecutive seeds behaved like one or two samples: this
+   * harness read Khe Sanh at 8/12 on 1000-1011 and 0/12 on 2000-2011 with the
+   * same code, and still disagreed 44% vs 15% at N=48. data.js's seededSim
+   * fixed that at the source. Twenty-four is a floor for a yes/no question; use
+   * 48 or more before moving a constant. */
   const N = +arg('--seeds', 24);
   const seed0 = +arg('--seed0', 1000) >>> 0;
   const seeds = Array.from({ length: N }, (_, i) => (seed0 + i) >>> 0);

@@ -224,6 +224,37 @@ function seeded(seed) {
   };
 }
 
+/* THE SIMULATION'S STREAM, and it is NOT the one above.
+ *
+ * `seeded` is a plain LCG, which is fine for laying out scenery from a map's
+ * fixed seed and is NOT fine for running a hundred matches off seeds 1000,
+ * 1001, 1002... Measured over 4000 consecutive seeds, the correlation between
+ * adjacent seeds' FIRST draw is 0.998 — the streams start out as the same
+ * number — and the second draw is still at 0.505.
+ *
+ * That is not a theoretical worry. Khe Sanh measured 8/12 on seeds 1000-1011
+ * and 0/12 on seeds 2000-2011 with identical code, and 48 seeds put the true
+ * rate at 44%. A block of twelve consecutive seeds is not twelve samples; it is
+ * closer to one or two, wearing twelve hats. Constants fitted to a block like
+ * that are fitted to noise, which is precisely what seeding the sim was
+ * supposed to end.
+ *
+ * mulberry32 has the avalanche the LCG lacks: the same test gives adjacent-seed
+ * correlations of -0.005, -0.020, -0.016 on draws 1, 2 and 3. It is also a
+ * better generator in its own right, and it is four lines.
+ *
+ * `seeded` stays exactly as it is: map layouts are generated from it and
+ * changing it would move scenery that has been looked at and approved. */
+function seededSim(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 const FACTIONS = {
   us: { name: 'US / ARVN', doctrine: 'FIREPOWER DOCTRINE', color: '#8aa06b', bright: '#b5c98f' },
   vc: { name: 'VC / NVA', doctrine: 'GROUND DOCTRINE', color: '#c25b45', bright: '#e08767' },
