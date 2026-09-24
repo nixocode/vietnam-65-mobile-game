@@ -4212,6 +4212,42 @@ const Renderer = {
       ctx.arc(L.x, L.y, L.r, 0, 7);
       ctx.fill();
     }
+    /* THE MOON, which was the one light source this pass forgot.
+     *
+     * The comment at the top of this function says the method is to multiply the
+     * world down and then put every light source back: muzzle flashes, burning
+     * structures, ground fire. The sky's own light was not on that list, so it
+     * went down with everything else — the sun disc and bloom baked into the sky
+     * layer are multiplied to nothing like any other pixel.
+     *
+     * Measured on a captured frame in CIELAB L*, which is the right ruler for a
+     * dark scene (relative luminance in linear light crushes everything below
+     * mid grey and made this frame look far worse than it is): Khe Sanh spanned
+     * 23 points against 77-87 on the daylight maps, and — the part that matters
+     * — ZERO PERCENT of it was above L*75. Not one pixel of true light anywhere
+     * in the frame. The scene reads by hue and silhouette alone.
+     *
+     * So the moon goes back on, cool and small and crisp against the warm ground
+     * fires, at the same screen position the sky's light already comes from so
+     * the horizon glow and the disc agree. Sky is blitted at 0,0 in screen space
+     * while this pass is in world space, hence camX + x. */
+    const mn = map.pal.sun;
+    if (mn) {
+      const mx = Camera.x + mn.x, my = mn.y, mr = mn.r * 0.42;
+      const halo = ctx.createRadialGradient(mx, my, mr * 0.5, mx, my, mn.r * 3.4);
+      halo.addColorStop(0, 'rgba(198,216,255,0.30)');
+      halo.addColorStop(0.35, 'rgba(170,196,255,0.10)');
+      halo.addColorStop(1, 'rgba(150,180,255,0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(mx, my, mn.r * 3.4, 0, 7); ctx.fill();
+      const disc = ctx.createRadialGradient(mx, my, 0, mx, my, mr);
+      disc.addColorStop(0, 'rgba(236,244,255,0.92)');
+      disc.addColorStop(0.62, 'rgba(214,230,255,0.70)');
+      disc.addColorStop(1, 'rgba(190,212,255,0)');
+      ctx.fillStyle = disc;
+      ctx.beginPath(); ctx.arc(mx, my, mr, 0, 7); ctx.fill();
+    }
+
     // burning wreckage and ground fire keep their own glow going
     for (const st of game.structures) {
       if (!(st.burnT > 0) || !Camera.sees(st.x, 120)) continue;
