@@ -45,6 +45,11 @@ HEIGHT = float(arg('--height', '1.8'))
 ORTHO_K = 1.5
 CAM_ZK = 0.52
 ONLY = [c for c in (arg('--only', '') or '').split(',') if c]
+# `--only` IS A PREVIEW, NOT A WAY TO SHIP ONE CLIP. Twice now, frames rendered
+# with `--only` have differed from the same clips in a full render of the same
+# unit: the rig carries pose and constraint state from whatever ran before it in
+# the session, so which clips precede a clip changes its pixels. Use it to look
+# at something quickly; re-render the unit whole before packing.
 # prone pose angles: lay-out, torso prop, head, left leg, right leg
 PRONE_ANGLES = [float(v) for v in
                 arg('--prone', '78,-26,-34,9,-5').split(',')]
@@ -157,13 +162,15 @@ LOOPING = {'idle', 'idle2', 'run', 'runfire', 'walk', 'prone', 'fallback',
 # and looked at — see the note on foot_follow for why the first attempt at this
 # fixup silently did nothing.
 #
-# WHAT DOES NOT RETARGET: anything that drives the FEET. `Run_Gun` was tried as
-# an `advance` and rendered legs stretched into ribbons trailing off the frame.
-# It drives 19 bones against Duck's 11, and the extra ones are foot and
-# pole-target channels carrying positions from a rig with different proportions;
-# the host's legs stretch trying to reach them. `Duck` transfers cleanly because
-# it is rotations only and touches no foot at all. Check the bone count and the
-# channel list before adding an entry here — the ones that work are small.
+# WHAT DOES NOT RETARGET IS LOCATION, NOT SIZE. This note used to say `Run_Gun`
+# could not be used — it drives 19 bones against Duck's 11 and rendered legs
+# stretched into ribbons. The bone count was a red herring. The extra channels
+# are Foot, PoleTarget and Shoulder LOCATIONS, positions measured in a rig with
+# different proportions, and the host's mesh stretches trying to reach them. The
+# ROTATIONS transfer fine, and `foot_follow` re-parents the feet to the shins
+# every frame anyway, so the stride survives without them. Drop the locations
+# (FOREIGN_ROT_ONLY) and `Run_Gun` comes through clean on every donor including
+# the mirrored one. Check the CHANNEL LIST, not the bone count.
 FOREIGN = {
     'kneel': ('weapons.glb', 'Duck', 0.30, 0.62, -26.0, 26.0),
     # PRONE is the same crouch taken deeper and leaned further forward. It is
@@ -181,6 +188,24 @@ FOREIGN = {
     # going to ground; played backwards it is getting up. Ends at 0.30 exactly
     # where `kneel` begins, so the handoff is the same frame.
     'settle': ('weapons.glb', 'Duck', 0.0, 0.30, -26.0, 26.0),
+    # RUNFIRE, WHICH WAS A DUPLICATE OF RUN.
+    #
+    # STATE_ACTIONS pointed `run` and `runfire` at the SAME donor action,
+    # `Run_Shoot`, sampled at 24 frames and at 20. Rendered side by side they
+    # are the same animation, so 20 frames a unit — 15% of the atlas — bought
+    # nothing, while Sprite3D._sel has always picked between them on whether the
+    # man is in combat. The distinction was modelled and never drawn.
+    #
+    # `Run_Gun` off the seventh rig is a genuinely different cycle: more forward
+    # lean, the weapon carried across the body instead of swinging, a shorter
+    # and more deliberate stride. That is what moving under fire should look
+    # like next to a sprint, and it costs nothing — same clip, same 20 frames,
+    # a different source.
+    #
+    # It is also the clip the plan records as having failed: "tried as an
+    # `advance` and rendered legs stretched into ribbons". That was before
+    # FOREIGN_ROT_ONLY. The location channels were the problem, not the clip.
+    'runfire': ('weapons.glb', 'Run_Gun', 0.0, 1.0, 0.0, 0.0),
 }
 
 # Clips whose fixup RAMPS from nothing to its full value across the clip rather
@@ -214,6 +239,37 @@ FOREIGN_RAMP = {'settle'}
 # frame 0 — which matters, because `settle` must still hand off to kneel frame 0
 # with no step.
 FOREIGN_BREATHE = {'kneel': 1.7, 'prone': 1.2}
+
+# Foreign clips taken as ROTATIONS ONLY.
+#
+# `Duck` works because it is eleven bones of pure rotation and touches no foot.
+# `Run_Gun` drives nineteen, and the extra ones are Foot, PoleTarget and
+# Shoulder LOCATION channels — positions measured in a rig with different
+# proportions. Transferring those is what stretched the legs into ribbons the
+# first time this was tried. But the host rig does not need them: `foot_follow`
+# already re-parents the feet to the shins every frame (FOLLOW), so the stride
+# is carried entirely by the leg rotations, which DO transfer.
+#
+# Dropping the locations also drops the Body translation, which is the vertical
+# bob and the forward travel. Losing the bob costs a little; losing the forward
+# travel is a gain, because a sprite cycle has to be in place.
+FOREIGN_ROT_ONLY = {'runfire'}
+
+# DONORS THAT MUST NOT TAKE A GIVEN FOREIGN CLIP.
+#
+# `adventurer` (m60, recon) is mirrored left-right, and the correction shipped
+# for it covers pelvis, legs and arms but not the torso — which is why its
+# crouch holds the weapon about 30 degrees LOW. `Run_Gun` shows the same
+# residual in the other direction: measured off the muzzle table, its barrel tip
+# sits at y=29-59 of a 256px render where every other donor is at 106-145, i.e.
+# the man runs with the gun pointed at the sky, and four frames then fall
+# outside the atlas crop band.
+#
+# So those two units keep the old `Run_Shoot` runfire. Eleven of thirteen get
+# the better cycle; the two that cannot are named here rather than shipped
+# broken. The real fix is a non-mirrored donor body for them, which is a visible
+# art change and the owner's call.
+FOREIGN_SKIP_MODEL = {'runfire': {'adventurer'}}
 
 # Bones that must be made to follow a parent they do not actually have.
 #
@@ -272,6 +328,9 @@ STATE_ACTIONS = {
     'aim':   'Idle_Gun_Pointing',
     'fire':  'Idle_Gun_Shoot',
     'run':   'Run_Shoot',      # the plain Run is empty-handed; this keeps the grip
+    # `runfire` comes from weapons.glb's Run_Gun for twelve of the thirteen
+    # units — see FOREIGN. This entry is the FALLBACK for the one donor that
+    # cannot take it; see FOREIGN_SKIP_MODEL.
     'runfire': 'Run_Shoot',
     'walk':  'Walk',
     'death': 'Death',
@@ -1392,7 +1451,7 @@ def bind_action(arm, act):
     bpy.context.view_layer.update()
 
 
-def foot_follow(arm, lift=0.0, head_deg=0.0, ramp=False, breathe=0.0):
+def foot_follow(arm, lift=0.0, head_deg=0.0, ramp=False, breathe=0.0, rot_only=False):
     """Per-frame pose_fn: bake, fix up, then reattach the feet. See FOLLOW."""
     had = arm.animation_data.action if arm.animation_data else None
     slot = getattr(arm.animation_data, 'action_slot', None) if arm.animation_data else None
@@ -1493,10 +1552,12 @@ def foot_follow(arm, lift=0.0, head_deg=0.0, ramp=False, breathe=0.0):
                 sloc, srot, ssca = src_basis[sbn].decompose()
                 d = rs @ srot @ rs.inverted()          # the turn, in armature space
                 rot_t = rt.inverted() @ d @ rt
-                if bn in locs:
+                if bn in locs and not rot_only:
                     v = rs @ sloc                      # the move, in armature space
                     loc_t = rt.inverted() @ v
                 else:
+                    # rot_only: keep the host's own translation — see
+                    # FOREIGN_ROT_ONLY for why a foreign one does not transfer
                     loc_t = pb.matrix_basis.to_translation()
                 pb.matrix_basis = Matrix.LocRotScale(loc_t, rot_t, ssca)
         bpy.context.view_layer.update()
@@ -1730,6 +1791,11 @@ def main():
             if prev.get(name):
                 index['clips'][name] = prev[name]
             continue
+        # some donors cannot take some clips — see FOREIGN_SKIP_MODEL. The
+        # builtin render above already produced one, so just leave it alone.
+        if MODEL_FOR.get(UNIT) in FOREIGN_SKIP_MODEL.get(name, ()):
+            print('FOREIGN skip %s for %s (%s)' % (name, UNIT, MODEL_FOR.get(UNIT)))
+            continue
         act = load_foreign_action(fname, want)
         if not act:
             if prev.get(name):
@@ -1742,7 +1808,8 @@ def main():
         index['clips'][name] = render_clip(
             name, act, sc,
             pose_fn=foot_follow(arm, lift, head_deg, ramp=name in FOREIGN_RAMP,
-                                breathe=BREATHE_K * FOREIGN_BREATHE.get(name, 0.0)),
+                                breathe=BREATHE_K * FOREIGN_BREATHE.get(name, 0.0),
+                                rot_only=name in FOREIGN_ROT_ONLY),
             span=(fa, fb))
 
     # The hand-posed prone is kept, and is no longer reached: `prone` is in
