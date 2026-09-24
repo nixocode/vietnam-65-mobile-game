@@ -2033,7 +2033,7 @@ class Game {
       case 'punji':
         this.traps.push({ side, lane, x, type: 'punji', discovered: false, defuse: 0 });
         Sound.shovel(x);
-        if (isPlayer) this.emit(`PUNJI STAKES SET — LANE ${lane + 1}`, side);
+        if (isPlayer) { this.emit(`PUNJI STAKES SET — LANE ${lane + 1}`, side); this.mark('punji'); }
         break;
       case 'mine':
         this.traps.push({ side, lane, x, type: 'mine', discovered: false, defuse: 0 });
@@ -2043,12 +2043,12 @@ class Game {
       case 'spiderhole':
         this.holes.push(this._makeHole(lane, x));
         Sound.shovel(x);
-        if (isPlayer) this.emit(`MARKSMAN BURIED — LANE ${lane + 1}`, side);
+        if (isPlayer) { this.emit(`MARKSMAN BURIED — LANE ${lane + 1}`, side); this.mark('spiderhole'); }
         break;
       case 'tunnel':
         this.tunnels.push({ side, lane, x, discovered: false, defuse: 0, hp: 90 });
         Sound.shovel(x);
-        if (isPlayer) this.emit(`TUNNEL EXIT DUG — LANE ${lane + 1}`, side);
+        if (isPlayer) { this.emit(`TUNNEL EXIT DUG — LANE ${lane + 1}`, side); this.mark('tunnel'); }
         this.fx.smokePuff(x, groundY(this.map, lane, x));
         break;
     }
@@ -3455,6 +3455,7 @@ class Game {
           Sound.radio();
           this.fx.floater(f.x, groundY(this.map, f.lane, f.x) - 50, 'FLAG SECURED', side === 'us' ? '#b5c98f' : '#e08767', true);
           this.emit(`OBJECTIVE ${side === 'us' ? 'SECURED BY US' : 'TAKEN BY VC'} — LANE ${f.lane + 1}`, side);
+          if (side === this.player) this.mark('flagtaken');
         }
       } else if (!side) {
         f.cap = Math.max(0, f.cap - dt * 0.25);

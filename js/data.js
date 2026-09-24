@@ -700,7 +700,7 @@ const CAMPAIGN = [
     objectives: ['◆ Break enemy morale', '◆ Follow your field orders at the top of the screen', '◆ Hold the lane flags to bleed their will to fight', '◆ Try each call-in: Fire Mission [Q], Napalm [W], Dustoff [E]'],
   },
   {
-    map: 'cuchi', side: 'vc', diff: 'veteran', title: 'THE EARTH FIGHTS',
+    map: 'cuchi', side: 'vc', diff: 'veteran', title: 'THE EARTH FIGHTS', guide: 'cuchi',
     meta: 'CU CHI DISTRICT · JANUARY 1966 · PLAYING: LOCAL FORCE VC',
     brief: 'Beneath this stretch of jungle northwest of Saigon run two hundred kilometers of hand-dug tunnels — hospitals, workshops, barracks, all underground. The Americans sweeping above have more of everything except one thing: they do not know where you are.\n\nYou have no artillery and no aircraft. You have the ground. Seed the lanes with punji pits before their point men arrive, keep your fighters in the brush, and make every meter cost them.',
     objectives: ['◆ Break enemy morale', '◆ Place traps ahead of their advance [Q]/[W]', '◆ Dig a tunnel [R] to reinforce forward without walking'],
@@ -742,12 +742,31 @@ const CAMPAIGN = [
  * The orders are guidance, never a gate. The operation is won or lost on morale
  * exactly as before; a player who ignores them loses nothing but the lesson. */
 const GUIDES = {
+  /* Field orders. Guidance, never a gate: each step completes on a `Game.mark`
+   * raised beside the existing tutor hooks, and a player who ignores them can
+   * still win. Adding a mission is a table entry here plus `guide:` on it.
+   *
+   * ONE LINE OF HUD, so keep the text under ~44 characters — it has to fit a
+   * 375px phone beside the ORDERS n/N prefix. */
   lzxray: [
     { mark: 'deployed', text: 'DEPLOY A SQUAD INTO A LANE' },
     { mark: 'trench',   text: 'TAKE A TRENCH AT MID-FIELD' },
     { mark: 'dugin',    text: 'HOLD THE TRENCH UNTIL DUG IN' },
     { mark: 'movedout', text: 'HOLD UNTIL RANGED — THEN THROW THE LEVER' },
     { mark: 'm79',      text: 'FIRE A WEAPONS TEAM M79 AT THE ENEMY' },
+  ],
+  /* THE EARTH FIGHTS — the player's first mission as the VC, and the first
+   * time the toolkit is completely different: no fire support at all, four
+   * call-ins that shape the ground instead. Measured before this was written, a
+   * player on the VC side wins about half as often as one on the US side, and
+   * the second mission is where that gap starts. These are the four things the
+   * side is FOR, in the order they become useful. */
+  cuchi: [
+    { mark: 'deployed',   text: 'DEPLOY A CELL INTO A LANE' },
+    { mark: 'punji',      text: 'SET PUNJI STAKES IN THEIR PATH [Q]' },
+    { mark: 'spiderhole', text: 'BURY A MARKSMAN IN AMBUSH [E]' },
+    { mark: 'tunnel',     text: 'DIG A TUNNEL PAST THEIR LINE [R]' },
+    { mark: 'flagtaken',  text: 'TAKE A LANE FLAG — BLEED THEIR WILL' },
   ],
 };
 
