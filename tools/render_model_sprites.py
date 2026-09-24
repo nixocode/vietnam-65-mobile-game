@@ -50,6 +50,7 @@ PRONE_ANGLES = [float(v) for v in
                 arg('--prone', '78,-26,-34,9,-5').split(',')]
 # kneel fixup: torso lift, head lift — see KNEEL_FIX use below
 KNEEL_FIX = [float(v) for v in arg('--kneel', '0,0').split(',')]
+BREATHE_K = float(arg('--breathe', '1.0'))   # scales FOREIGN_BREATHE, for sweeping
 POSED_PRONE = '--posed-prone' in sys.argv
 NORENDER = '--norender' in argv   # re-derive muzzle points without redrawing frames
 
@@ -188,6 +189,31 @@ FOREIGN = {
 # which carries the kneel's full correction. A constant fix would lift the head
 # of a man still standing; no fix would pop at the handoff.
 FOREIGN_RAMP = {'settle'}
+
+# A HELD POSTURE IS NOT A STILL IMAGE — and both of ours were.
+#
+# Measured across all thirteen units, as mean absolute pixel difference from
+# frame 0 over each clip: idle 26, idle2 14, aim 21, fire 63, walk 134, dive 218
+# — and KNEEL 0.45, PRONE 0.17. The two postures a man holds longest, and the
+# two he fights from, were the only clips in the game with no motion at all. A
+# squad dug into a trench was thirteen statues.
+#
+# The cause is the crop, not the retarget: `kneel` is the middle of `Duck`,
+# which is where the donor is HOLDING the crouch, so all five frames are the
+# same pose. `prone` is a tighter crop of the same hold, which is why it is even
+# flatter. Nothing was wrong; there was simply nothing in the source to see.
+#
+# The renderer was already built for motion that was not there — Sprite3D._sel
+# cycles these clips at time*0.22 (a ~4.5s loop, a resting breath rate) with
+# sub-frame blending, and adds a 1.35px sway on top. So the fix belongs here: a
+# slow breath baked into the frames, in degrees of torso pitch, with the head
+# counter-pitching so the face stays down the barrel rather than nodding with
+# the chest.
+#
+# sin(2*pi*t) over a LOOPING clip's t = i/n closes exactly, and it is zero at
+# frame 0 — which matters, because `settle` must still hand off to kneel frame 0
+# with no step.
+FOREIGN_BREATHE = {'kneel': 1.7, 'prone': 1.2}
 
 # Bones that must be made to follow a parent they do not actually have.
 #
@@ -1366,7 +1392,7 @@ def bind_action(arm, act):
     bpy.context.view_layer.update()
 
 
-def foot_follow(arm, lift=0.0, head_deg=0.0, ramp=False):
+def foot_follow(arm, lift=0.0, head_deg=0.0, ramp=False, breathe=0.0):
     """Per-frame pose_fn: bake, fix up, then reattach the feet. See FOLLOW."""
     had = arm.animation_data.action if arm.animation_data else None
     slot = getattr(arm.animation_data, 'action_slot', None) if arm.animation_data else None
@@ -1485,6 +1511,12 @@ def foot_follow(arm, lift=0.0, head_deg=0.0, ramp=False):
             _pitch(arm, 'Torso', lift * k, axis='Z')
         if head_deg:
             _pitch(arm, 'Head', head_deg * k, axis='Z')
+        # the breath — see FOREIGN_BREATHE. Applied after the fixup and before
+        # the feet, which the torso does not move.
+        if breathe:
+            b = breathe * math.sin(2.0 * math.pi * _t)
+            _pitch(arm, 'Torso', b, axis='Z')
+            _pitch(arm, 'Head', -0.45 * b, axis='Z')
         for child, parent in FOLLOW:
             cb, pb = arm.pose.bones.get(child), arm.pose.bones.get(parent)
             if cb and pb and child in rel:
@@ -1709,7 +1741,8 @@ def main():
             lift, head_deg = KNEEL_FIX
         index['clips'][name] = render_clip(
             name, act, sc,
-            pose_fn=foot_follow(arm, lift, head_deg, ramp=name in FOREIGN_RAMP),
+            pose_fn=foot_follow(arm, lift, head_deg, ramp=name in FOREIGN_RAMP,
+                                breathe=BREATHE_K * FOREIGN_BREATHE.get(name, 0.0)),
             span=(fa, fb))
 
     # The hand-posed prone is kept, and is no longer reached: `prone` is in

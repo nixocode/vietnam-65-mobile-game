@@ -19,6 +19,7 @@
  *   node tools/simnode.js                    # a match on every map
  *   node tools/simnode.js --map iadrang      # one map
  *   node tools/simnode.js --secs 240
+ *   node tools/simnode.js --seed 1          # reproducible: same numbers every time
  */
 'use strict';
 const fs = require('fs');
@@ -92,13 +93,14 @@ function build() {
     .map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n;\n');
   const ctx = vm.createContext(sandbox);
   // one script, so the files share a lexical scope the way <script> tags do
-  vm.runInContext(src + '\n;globalThis.__api = { Game, UNITS, SQUADS, MAPS, COVER, GRENADE, M79, Tutor, WORLD_W, LANE_N };',
+  vm.runInContext(src + '\n;globalThis.__api = { Game, UNITS, SQUADS, MAPS, COVER, GRENADE, M79, Tutor, WORLD_W, LANE_N, engageFrac, CAMPAIGN, DIFFS, CALLINS, MORALE_LOSS, INCOME };',
                   ctx, { filename: 'vietnam-sim.js' });
   return { api: sandbox.__api, sound: sandbox.Sound };
 }
 
-function match(api, mapId, side, secs, buy) {
-  const g = new api.Game({ mapId, playerSide: side, difficulty: 'veteran' });
+function match(api, mapId, side, secs, buy, seed) {
+  const g = new api.Game({ mapId, playerSide: side, difficulty: 'veteran',
+                           seed: seed == null ? undefined : seed });
   const foe = side === 'us' ? 'vc' : 'us';
   let kills = 0, shots = 0;
   const k0 = g._kill.bind(g); g._kill = function (...a) { kills++; return k0(...a); };
@@ -111,7 +113,7 @@ function match(api, mapId, side, secs, buy) {
     for (const c of dug) if (c.occ.length) dugFrames++;
   }
   return {
-    map: mapId, side, secs: +t.toFixed(0), over: !!g.over,
+    map: mapId, side, seed: g.seed, secs: +t.toFixed(0), over: !!g.over,
     kills, shots, roundsPerCasualty: kills ? +(shots / kills).toFixed(1) : null,
     trenches: dug.length,
     trenchOccupancy: dug.length ? +(dugFrames / (frames * dug.length)).toFixed(3) : null,
@@ -128,7 +130,12 @@ if (require.main === module) {
                 vc: ['nvasq', 'cell', 'rpdteam', 'sapperu'] };
   const t0 = Date.now();
   const rows = [];
-  for (const m of maps) for (const s of ['us', 'vc']) rows.push(match(api, m, s, secs, BUY[s]));
+  // --seed makes the whole sweep reproducible; without it each run is fresh.
+  const seedArg = arg('--seed', null);
+  const seed0 = seedArg == null ? null : (+seedArg >>> 0);
+  let si = 0;
+  for (const m of maps) for (const s of ['us', 'vc'])
+    rows.push(match(api, m, s, secs, BUY[s], seed0 == null ? null : (seed0 + si++) >>> 0));
   console.log(JSON.stringify({
     runs: rows,
     weaponVoicesHeard: Object.keys(sound.heard).filter(k => k.startsWith('shot:')).sort(),

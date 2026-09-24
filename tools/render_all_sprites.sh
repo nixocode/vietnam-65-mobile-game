@@ -13,7 +13,10 @@ BLENDER=/Applications/Blender.app/Contents/MacOS/Blender
 # rpgman was missing from this list, so a "rebuild everything" run silently left
 # it on whatever frame counts it was last rendered with while the other eleven
 # moved on. Twelve units have atlases; twelve belong here.
-UNITS=${@:-"rifleman arvn m60 engineer recon sniper guerrilla nva rpd sapper marksman rpgman"}
+# ...and grenadier was missing the same way rpgman had been, so the same
+# silent bug recurred: "rebuild everything" left one unit on whatever frame
+# counts it was last rendered with. THIRTEEN units have atlases.
+UNITS=${@:-"rifleman arvn m60 engineer recon sniper guerrilla nva rpd sapper marksman rpgman grenadier"}
 
 for u in $UNITS; do
   echo "--- $u"

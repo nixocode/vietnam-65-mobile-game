@@ -25,16 +25,30 @@ the 256->128 downsample it lands as a subtle contact edge rather than a stroke.
 The pass rewrites files in place, so running it twice would stroke the stroke.
 A ledger of the mtimes this tool itself wrote makes it safe to re-run over a
 directory where only some frames were re-rendered.
+
+THE LEDGER IS NOT ENOUGH, and that cost a full rebuild. It lives in the sprite
+directory and is gitignored, so a tree whose frames are present but whose ledger
+is not — a fresh clone that then renders one clip, or any directory the ledger
+was cleaned out of — reads as "nothing has been stroked" and strokes all of it a
+second time. Measured on the mobile tree when it happened: +14% footprint and
+the dark fraction 0.38 -> 0.45 on every clip, which is precisely the black-blob
+read the thin outline exists to avoid.
+
+So the file now carries its own mark, in a PNG text chunk that travels with the
+image. The ledger stays as the fast path (no decode needed); the mark is the one
+that cannot be lost.
 """
 import json
 import os
 import sys
 
 import numpy as np
-from PIL import Image
+from PIL import Image, PngImagePlugin
 from scipy import ndimage
 
 LEDGER = '.outlined.json'
+# Written into every stroked PNG. Survives a lost ledger, a copy and a move.
+MARK = 'v65_outlined'
 
 # One pixel at render resolution, which survives the downsample to the atlas as
 # a soft edge. Colour is lifted off near-black (was 26,30,20) and warmed, so it
@@ -46,7 +60,11 @@ ALPHA = 0.72
 
 
 def outline(path, width=WIDTH, colour=COLOUR, alpha=ALPHA):
-    im = Image.open(path).convert('RGBA')
+    """Stroke one frame. Returns False if it was already stroked."""
+    src = Image.open(path)
+    if src.info.get(MARK):
+        return False
+    im = src.convert('RGBA')
     a = np.array(im).astype(np.float32)
     solid = a[:, :, 3] > 110
     grown = ndimage.binary_dilation(solid, np.ones((3, 3)), iterations=width)
@@ -58,7 +76,28 @@ def outline(path, width=WIDTH, colour=COLOUR, alpha=ALPHA):
         for c in range(3):
             a[:, :, c][rim] = colour[c]
         a[:, :, 3][rim] = 255.0 * alpha
-    Image.fromarray(a.clip(0, 255).astype(np.uint8)).save(path)
+    info = PngImagePlugin.PngInfo()
+    info.add_text(MARK, str(width))
+    Image.fromarray(a.clip(0, 255).astype(np.uint8)).save(path, pnginfo=info)
+    return True
+
+
+def ensure_mark(path):
+    """Stamp a file the LEDGER says is stroked but which carries no mark.
+
+    Migration for frames stroked before the mark existed: without this they
+    would be marked only on their next re-render, and until then a lost ledger
+    could still double-stroke them — which is the whole failure this is for.
+    Pixels are untouched; only the text chunk is added.
+    """
+    im = Image.open(path)
+    if im.info.get(MARK):
+        return False
+    im = im.convert('RGBA')
+    info = PngImagePlugin.PngInfo()
+    info.add_text(MARK, str(WIDTH))
+    im.save(path, pnginfo=info)
+    return True
 
 
 def main(d):
@@ -69,19 +108,31 @@ def main(d):
             done = json.load(open(lp))
         except Exception:
             done = {}
-    n = skipped = 0
+    n = skipped = marked = stamped = 0
     for f in sorted(os.listdir(d)):
         if not f.endswith('.png'):
             continue
+        # atlas.png is this pipeline's OUTPUT, not one of its frames. The normal
+        # order (render, outline, pack) hides that — pack overwrites whatever
+        # this did to it — but run once after a pack and it strokes every cell
+        # of the finished sheet a second time. Skip it by name.
+        if f == 'atlas.png':
+            continue
         p = os.path.join(d, f)
         if done.get(f) == os.path.getmtime(p):
+            if ensure_mark(p):
+                stamped += 1
+                done[f] = os.path.getmtime(p)
             skipped += 1
             continue
-        outline(p)
+        if outline(p):
+            n += 1
+        else:
+            marked += 1          # the ledger had lost it; the file had not
         done[f] = os.path.getmtime(p)
-        n += 1
     json.dump(done, open(lp, 'w'))
-    print('outlined %d (%d already done) in %s' % (n, skipped, d))
+    print('outlined %d (%d already done, %d already marked, %d stamped) in %s'
+          % (n, skipped, marked, stamped, d))
 
 
 if __name__ == '__main__':
