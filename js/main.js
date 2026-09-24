@@ -99,6 +99,9 @@ const App = {
   boot() {
     const canvas = document.getElementById('game-canvas');
     try { Sound.musicOff = localStorage.getItem('v65_music') === '0'; } catch (e) { /* private mode */ }
+    try { Sound.muted = localStorage.getItem('v65_mute') === '1'; } catch (e) { /* private mode */ }
+    // and the buttons must show what was restored — see _syncHud
+    setTimeout(() => this._syncHud(), 0);
     this._fitViewport();
     /* Re-run once layout is real. The call above can land before the stylesheet
      * has sized the stage, and the observer below only fires on a CHANGE — so a
@@ -398,12 +401,31 @@ const App = {
     Sound.click();
   },
 
+  /* `_syncHud` WAS CALLED AND NEVER DEFINED.
+   *
+   * toggleMusic has ended with `this._syncHud()` since it was written, and there
+   * is no such method: every click on the music button threw a TypeError out of
+   * its handler. The music itself toggled — the throw is the last statement —
+   * but the button never showed its state, and the console carried an error for
+   * every press. Same bug class as the dead `emit` templates: a piece of
+   * feedback that could never fire.
+   *
+   * One place now owns both buttons, and both toggles call it. */
+  _syncHud() {
+    const sb = document.getElementById('btn-mute');
+    if (sb) sb.classList.toggle('off', !!Sound.muted);
+    const mb = document.getElementById('btn-music');
+    if (mb) mb.classList.toggle('off', !!Sound.musicOff);
+  },
+
+  /* SND persists, for the same reason the music toggle does — and it did not,
+   * which meant anyone who plays muted had to press M again on every reload and
+   * every restart. Stored beside `v65_music`. */
   toggleMute() {
     Sound.init();
     Sound.setMuted(!Sound.muted);
-    document.getElementById('btn-mute').classList.toggle('off', Sound.muted);
-    const mb = document.getElementById('btn-music');
-    if (mb) mb.classList.toggle('off', !!Sound.musicOff);
+    try { localStorage.setItem('v65_mute', Sound.muted ? '1' : '0'); } catch (e) { /* private mode */ }
+    this._syncHud();
   },
 
   _onKey(e) {
