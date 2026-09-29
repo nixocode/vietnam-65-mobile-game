@@ -3467,6 +3467,7 @@ const Renderer = {
       ctx.fillStyle = hz;
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
     }
+    this._bloom(ctx);
     /* Colour grade. Warm lift in the highlights, cool weight in the shadows —
      * the cheapest way to make a frame read as one photograph rather than a set
      * of separately-drawn layers. Two blends, no per-pixel work. */
@@ -4930,6 +4931,68 @@ const Renderer = {
   /* Soft contact shadow. Nothing sells "standing on the ground" like a shadow —
    * without one a sprite reads as a sticker pasted over the terrain. Cached as a
    * one-off blob because a radial gradient per unit per frame is pure waste. */
+  /* BLOOM — light that spills.
+   *
+   * The frame had a colour grade, a haze and a vignette and no bloom, and bloom
+   * is the one post pass that separates flat vector art from something that
+   * reads as photographed. Nothing in the scene glowed: a muzzle flash was a
+   * shape, a tracer a line, the sun a disc with a painted halo. Real optics
+   * spread bright light into what surrounds it, and the eye reads that spread
+   * as brightness the palette cannot otherwise reach — a canvas cannot draw
+   * anything brighter than #fff, so the only way to say "this is LIGHT" is to
+   * let it bleed.
+   *
+   * Cheap, and deliberately so. The frame goes into a small buffer, is
+   * multiplied by itself four times — v^5, the thresholding step done with
+   * blends rather than per-pixel work — then comes back blurred and additive.
+   * Four small blits and one full-screen add; no getImageData anywhere, so
+   * nothing de-accelerates the canvas.
+   *
+   * MOBILE IS TUNED HARDER THAN DESKTOP, in both directions:
+   *
+   *   - 192px buffer against desktop's 256, and a 5px blur against 7.
+   *   - Dropped below renderScale 0.92 rather than desktop's 0.72. Desktop can
+   *     afford to keep the glow while it gives up resolution; on a phone the
+   *     first sign of budget pressure should cost the glow BEFORE it costs
+   *     pixels. The scaler's first step down is -0.1, so the bloom goes the
+   *     moment the device misses its frame budget once.
+   *
+   * Both numbers are reasoned, not measured — frame rate cannot be measured
+   * from the build harness (see the note on the adaptive scaler). They want
+   * `?perf=1` on a real phone before anyone trusts them. */
+  BLOOM: 0.55,   // higher than it looks: v^5 has already thrown most of the frame away
+
+  _bloom(ctx) {
+    if (this.bloomOff || this.renderScale < 0.92) return;
+    const src = ctx.canvas;
+    if (!src.width || !src.height) return;
+    const bw = 192, bh = Math.max(1, Math.round(bw * CANVAS_H / CANVAS_W));
+    let b = this._bloomBuf;
+    if (!b) { b = this._bloomBuf = document.createElement('canvas'); b.width = bw; b.height = bh; }
+    const bx = b.getContext('2d');
+    bx.globalCompositeOperation = 'source-over';
+    bx.clearRect(0, 0, bw, bh);
+    bx.drawImage(src, 0, 0, src.width, src.height, 0, 0, bw, bh);
+    /* v^5, not v^3. At the cube the sky itself still passed — it is already
+     * bright — so adding the blurred sky back blew the highlights out and
+     * lifted the whole frame's mid-tones by 6 L*, which is a milky veil rather
+     * than light. The fifth power is selective enough that only things that
+     * really are light — the sun, a muzzle flash, fire, tracer — survive it. */
+    bx.globalCompositeOperation = 'multiply';
+    bx.drawImage(b, 0, 0);
+    bx.drawImage(b, 0, 0);
+    bx.drawImage(b, 0, 0);
+    bx.drawImage(b, 0, 0);
+    bx.globalCompositeOperation = 'source-over';
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = this.BLOOM;
+    ctx.filter = 'blur(5px)';
+    ctx.drawImage(b, 0, 0, bw, bh, 0, 0, CANVAS_W, CANVAS_H);
+    ctx.filter = 'none';
+    ctx.restore();
+  },
+
   _shadowBlob() {
     if (this._shadow) return this._shadow;
     const R = 64;
